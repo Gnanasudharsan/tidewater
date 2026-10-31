@@ -1,0 +1,216 @@
+# Tidewater local stack. Services are grouped into profiles so an 8 GB laptop
+# never runs everything at once. See the Makefile for `make up-core` etc.
+
+x-logging: &default-logging
+  driver: json-file
+  options: { max-size: "10m", max-file: "3" }
+
+services:
+  # ---------------------------------------------------------------- core
+  postgres-src:
+    image: postgres:16.4
+    profiles: ["core", "all"]
+    command:
+      - postgres
+      - -c
+      - wal_level=logical
+      - -c
+      - max_replication_slots=4
+      - -c
+      - max_wal_senders=4
+      - -c
+      - max_slot_wal_keep_size=2GB
+    environment:
+      POSTGRES_USER: ${SRC_PG_USER}
+      POSTGRES_PASSWORD: ${SRC_PG_PASSWORD}
+      POSTGRES_DB: ${SRC_PG_DB}
+    ports: ["5432:5432"]
+    volumes:
+      - pg-src-data:/var/lib/postgresql/data
+      - ./infra/postgres-src/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${SRC_PG_USER} -d ${SRC_PG_DB}"]
+      interval: 5s
+      retries: 20
+    mem_limit: 512m
+    logging: *default-logging
+
+  kafka:
+    image: apache/kafka:3.7.1
+    profiles: ["core", "all"]
+    environment:
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk  # base64 of a 16-byte UUID (KRaft requirement)
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093,EXTERNAL://:29092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,EXTERNAL://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_NUM_PARTITIONS: 3
+      KAFKA_LOG_RETENTION_HOURS: 168
+      KAFKA_HEAP_OPTS: -Xms512m -Xmx1g
+    ports: ["29092:29092"]
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 >/dev/null 2>&1"]
+      interval: 10s
+      retries: 20
+    mem_limit: 1536m
+    logging: *default-logging
+
+  schema-registry:
+    # Apicurio with KafkaSQL storage: schemas (and their IDs) survive restarts.
+    image: apicurio/apicurio-registry-kafkasql:2.6.2.Final
+    profiles: ["core", "all"]
+    depends_on:
+      kafka: { condition: service_healthy }
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      JAVA_OPTS: -Xmx384m
+    ports: ["8081:8080"]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:8080/health/ready >/dev/null"]
+      interval: 10s
+      retries: 30
+    mem_limit: 640m
+    logging: *default-logging
+
+  connect:
+    image: quay.io/debezium/connect:2.7.3.Final
+    profiles: ["core", "all"]
+    depends_on:
+      kafka: { condition: service_healthy }
+      postgres-src: { condition: service_healthy }
+      schema-registry: { condition: service_healthy }
+    environment:
+      BOOTSTRAP_SERVERS: kafka:9092
+      GROUP_ID: tidewater-connect
+      CONFIG_STORAGE_TOPIC: _connect_configs
+      OFFSET_STORAGE_TOPIC: _connect_offsets
+      STATUS_STORAGE_TOPIC: _connect_status
+      CONFIG_STORAGE_REPLICATION_FACTOR: 1
+      OFFSET_STORAGE_REPLICATION_FACTOR: 1
+      STATUS_STORAGE_REPLICATION_FACTOR: 1
+      ENABLE_APICURIO_CONVERTERS: "true"
+      HEAP_OPTS: -Xms256m -Xmx768m
+    ports: ["8083:8083"]
+    volumes:
+      - ./connect:/tidewater/connect:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:8083/ >/dev/null"]
+      interval: 10s
+      retries: 30
+    mem_limit: 1g
+    logging: *default-logging
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:v0.7.2
+    profiles: ["core", "all"]
+    depends_on:
+      kafka: { condition: service_healthy }
+    environment:
+      KAFKA_CLUSTERS_0_NAME: tidewater
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+      KAFKA_CLUSTERS_0_SCHEMAREGISTRY: http://schema-registry:8080/apis/ccompat/v7
+      KAFKA_CLUSTERS_0_KAFKACONNECT_0_NAME: debezium
+      KAFKA_CLUSTERS_0_KAFKACONNECT_0_ADDRESS: http://connect:8083
+      JAVA_OPTS: -Xmx256m
+    ports: ["8080:8080"]
+    mem_limit: 512m
+    logging: *default-logging
+
+  object-store:
+    # SeaweedFS S3 gateway. MinIO stopped publishing free images (see ADR 0006).
+    # Spark talks plain S3A to it, so moving to AWS S3 is an endpoint change.
+    image: chrislusf/seaweedfs:4.00
+    profiles: ["core", "all"]
+    environment:
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY}
+      S3_SECRET_KEY: ${S3_SECRET_KEY}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        cat > /tmp/s3.json <<JSON
+        {"identities":[{"name":"tidewater","credentials":[{"accessKey":"$$S3_ACCESS_KEY","secretKey":"$$S3_SECRET_KEY"}],"actions":["Admin","Read","Write","List","Tagging"]}]}
+        JSON
+        exec weed server -dir=/data -ip=object-store -ip.bind=0.0.0.0 -volume.max=0 \
+          -s3 -s3.port=8333 -s3.config=/tmp/s3.json
+    ports: ["8333:8333", "8888:8888"]
+    volumes:
+      - s3-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:9333/cluster/status && wget -q -O /dev/null http://localhost:8333/healthz"]
+      interval: 5s
+      retries: 30
+    mem_limit: 512m
+    logging: *default-logging
+
+  object-store-init:
+    # One-shot bucket bootstrap. Terraform takes this over in week 7.
+    image: chrislusf/seaweedfs:4.00
+    profiles: ["core", "all"]
+    depends_on:
+      object-store: { condition: service_healthy }
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - echo "s3.bucket.create -name ${LAKEHOUSE_BUCKET}" | weed shell -master=object-store:9333 && echo "s3.bucket.list" | weed shell -master=object-store:9333
+    restart: "no"
+
+  # ---------------------------------------------------------------- tools
+  simulator:
+    build: ./simulator
+    profiles: ["sim"]
+    environment:
+      PGHOST: postgres-src
+      PGPORT: 5432
+      PGUSER: ${SRC_PG_USER}
+      PGPASSWORD: ${SRC_PG_PASSWORD}
+      PGDATABASE: ${SRC_PG_DB}
+      SIM_EVENTS_PER_SEC: ${SIM_EVENTS_PER_SEC}
+      SIM_SEED_CUSTOMERS: ${SIM_SEED_CUSTOMERS}
+      SIM_SEED_PRODUCTS: ${SIM_SEED_PRODUCTS}
+    mem_limit: 256m
+    logging: *default-logging
+
+  # ---------------------------------------------------------------- warehouse
+  postgres-wh:
+    image: postgres:16.4
+    profiles: ["wh", "all"]
+    environment:
+      POSTGRES_USER: ${WH_PG_USER}
+      POSTGRES_PASSWORD: ${WH_PG_PASSWORD}
+      POSTGRES_DB: ${WH_PG_DB}
+    ports: ["5433:5432"]
+    volumes:
+      - pg-wh-data:/var/lib/postgresql/data
+      - ./infra/postgres-wh/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${WH_PG_USER} -d ${WH_PG_DB}"]
+      interval: 5s
+      retries: 20
+    mem_limit: 768m
+    logging: *default-logging
+
+  metabase:
+    image: metabase/metabase:v0.50.20
+    profiles: ["wh", "all"]
+    depends_on:
+      postgres-wh: { condition: service_healthy }
+    environment:
+      JAVA_OPTS: -Xmx768m
+    ports: ["3000:3000"]
+    mem_limit: 1g
+    logging: *default-logging
+
+volumes:
+  pg-src-data:
+  pg-wh-data:
+  kafka-data:
+  s3-data:
