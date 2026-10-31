@@ -13,7 +13,7 @@ Postgres 16 (WAL) ──▶ Debezium 2.7 ──▶ Kafka 3.7 (KRaft) ──▶ S
    simulator                           (Avro, BACKWARD)
 ```
 
-> 🚧 **Work in progress.** Weeks 0–1 (foundation, source DB, CDC) are done. See [Roadmap](#roadmap).
+> 🚧 **Work in progress.** Weeks 0–2 (foundation, CDC, bronze layer) are done. See [Roadmap](#roadmap).
 
 ## Results
 
@@ -22,6 +22,7 @@ _Benchmarks land in week 9. No numbers are claimed here until they are measured.
 | Metric | Target (SLO) | Measured |
 |---|---|---|
 | p95 source → silver latency | < 60 s | — |
+| Duplicate or missing offsets in bronze after crashes | 0 | **0** across 76,789 events, 3 mid-batch SIGKILLs + 1 post-commit crash ([chaos 01](tests/chaos/01_kill_bronze_mid_batch.sh)) |
 | Duplicate PKs in silver after chaos tests | 0 | — |
 | Source reconciliation | 100% | — |
 | Throughput | — | — |
@@ -33,9 +34,11 @@ Requires Docker with about 6 GB of RAM available.
 
 ```bash
 git clone https://github.com/Gnanasudharsan/tidewater.git && cd tidewater
-make up-core              # Postgres, Kafka, Debezium, schema registry, S3, Kafka UI
+make up-core              # Postgres, Kafka, Debezium, schema registry, S3, Kafka UI, bronze stream
 make register             # BACKWARD compatibility rule + Debezium connector
 make sim RATE=50          # generate live e-commerce traffic (Ctrl-C to stop)
+make verify-bronze        # prove bronze holds every Kafka offset exactly once
+make chaos-bronze         # SIGKILL the stream mid-batch under load, then verify
 ```
 
 Then open **Kafka UI at http://localhost:8080** and watch change events stream into
@@ -44,6 +47,7 @@ Then open **Kafka UI at http://localhost:8080** and watch change events stream i
 | Service | URL |
 |---|---|
 | Kafka UI | http://localhost:8080 |
+| Spark UI (bronze stream) | http://localhost:4040 |
 | Kafka Connect REST | http://localhost:8083 |
 | Schema registry (Apicurio) | http://localhost:8081 |
 | S3 endpoint / filer UI | http://localhost:8333 / http://localhost:8888 |
@@ -53,7 +57,7 @@ Then open **Kafka UI at http://localhost:8080** and watch change events stream i
 
 | Command | Services | Approx. RAM |
 |---|---|---|
-| `make up-core` | postgres-src, kafka, connect, schema-registry, object-store, kafka-ui | ~5 GB |
+| `make up-core` | postgres-src, kafka, connect, schema-registry, object-store, kafka-ui, spark-bronze | ~6 GB limits, ~3 GB actual |
 | `make up-wh` | postgres-wh, metabase | ~2 GB |
 | `make up-all` | everything | 16 GB machines |
 
@@ -61,6 +65,7 @@ Then open **Kafka UI at http://localhost:8080** and watch change events stream i
 
 | Guarantee | Mechanism | Proof |
 |---|---|---|
+| Bronze has every Kafka record exactly once | Streaming checkpoint + Delta idempotent writes (`txnAppId`, `txnVersion = batch_id`) | [chaos 01](tests/chaos/01_kill_bronze_mid_batch.sh) kills mid-batch and right after the Delta commit, then [`verify_bronze.py`](spark/jobs/verify_bronze.py) checks every partition for duplicates and gaps |
 | No duplicates | Silver `MERGE` on PK, guarded by `incoming.lsn > target.lsn` | unit tests + chaos suite _(weeks 3–8)_ |
 | Correct order under replays and backfills | WAL LSN ordering ([ADR 0003](docs/adr/0003-lsn-based-ordering.md)) | out-of-order unit tests _(weeks 3–4)_ |
 | Deletes propagate, history kept | Soft deletes ([ADR 0002](docs/adr/0002-soft-deletes.md)) | reconciliation _(weeks 3–4)_ |
@@ -85,18 +90,18 @@ docs/         design doc, ADRs, runbooks, dev log
 infra/        Postgres init SQL (source + warehouse)
 scripts/      operational scripts (connector registration, reconciliation)
 simulator/    Python + Faker transaction generator
-spark/        bronze / silver streaming jobs          (week 2+)
+spark/        Spark image, bronze stream, verifier    (silver in weeks 3–4)
 dbt/          staging, dims, facts, metrics           (week 5+)
 airflow/      DAGs                                    (week 7)
 terraform/    S3 buckets, Snowflake objects           (week 7+)
-tests/        unit, integration, chaos
+tests/        unit and chaos tests (integration in week 7)
 ```
 
 ## Roadmap
 
 - [x] **Week 0:** design doc, ADRs, repo tooling
 - [x] **Week 1:** source schema, simulator, Debezium CDC, schema registry (BACKWARD)
-- [ ] **Week 2:** bronze (Kafka → Delta, append-only, offset-gap checker)
+- [x] **Week 2:** bronze (Kafka → Delta, append-only, idempotent writes, offset-gap checker, chaos test 01)
 - [ ] **Weeks 3–4:** silver (dedup, LSN-guarded MERGE, soft deletes, DQ, backfill, reconciliation)
 - [ ] **Week 5:** warehouse load and dbt staging
 - [ ] **Week 6:** dimensional model, SCD2, MetricFlow, Metabase

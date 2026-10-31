@@ -29,3 +29,12 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - run: cp .env.example .env && docker compose --profile all --profile sim config -q
+
+  spark-tests:
+    # Runs the Spark tests in the same image the pipeline uses, so CI matches local exactly.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - run: cp .env.example .env
+      - run: docker compose build spark-bronze
+      - run: docker compose run --rm --no-deps spark-bronze python3 -m pytest -q -p no:cacheprovider tests

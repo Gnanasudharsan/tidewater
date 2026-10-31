@@ -2,6 +2,30 @@
 
 Bugs hit, root causes, and fixes. Newest first.
 
+## 2026-10-31: Week 2, bronze layer
+- **Checkpoint writes failed with `ParentNotDirectoryException: parent is not a dir`.**
+  A probe showed that after `mkdirs("dir1")`, S3A's `getFileStatus("dir1")` reports
+  `isFile=true` on SeaweedFS (AWS S3 returns 404 for the bare key, so S3A falls back
+  to a directory listing). Plain `FileSystem.create` and Delta writes worked; only
+  Spark's default FileContext-based checkpoint manager checks the parent and fails.
+  Fix: `spark.sql.streaming.checkpointFileManagerClass =
+  FileSystemBasedCheckpointFileManager`, which also works on AWS S3.
+- **The chaos test reported "crash never triggered" while the logs showed it had.**
+  `docker compose logs | grep -q` under `set -o pipefail`: `grep -q` exits on the
+  first match, `compose logs` dies of SIGPIPE, and the pipeline counts as failed.
+  Fix: use `grep -c`, which reads all of its input.
+- **Random SIGKILLs alone don't prove the idempotent write matters.** The dangerous
+  window is after the Delta commit and before the checkpoint commit, and random
+  kills rarely land in it. Added a chaos hook (`BRONZE_CHAOS_CRASH_AFTER_COMMIT=1`)
+  that exits exactly there. The restarted stream replays that batch id, and the
+  job logs that Delta skipped it via `txnAppId`/`txnVersion`.
+- **Gotcha to remember:** `txnAppId` must change whenever the checkpoint is reset.
+  Batch ids restart at 0, and Delta would silently skip them as already committed.
+  The checkpoint path is derived from `BRONZE_TXN_APP_ID`, so bumping it resets both.
+- `ENV PYTHONPATH=/opt/tidewater` in the Spark Dockerfile replaced the base image's
+  path, so `import pyspark` failed outside `spark-submit`. Added `/opt/spark/python`
+  and the py4j zip back.
+
 ## 2026-10-31: Week 0/1 scaffolding
 - **`docker pull minio/minio` failed: "repository does not exist".** MinIO no
   longer publishes free images on Docker Hub or Quay. Switched to SeaweedFS's
