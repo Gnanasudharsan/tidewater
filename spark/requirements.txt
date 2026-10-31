@@ -1,0 +1,3 @@
+importlib-metadata==8.4.0
+pytest==8.3.2
+chispa==0.10.1
