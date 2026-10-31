@@ -1,0 +1,24 @@
+[project]
+name = "tidewater"
+version = "0.1.0"
+description = "CDC lakehouse: Postgres -> Debezium -> Kafka -> Spark/Delta -> dbt, with provable exactly-once results."
+requires-python = ">=3.11"
+license = { text = "MIT" }
+
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["tidewater_sim"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests/unit"]
+pythonpath = ["simulator"]
