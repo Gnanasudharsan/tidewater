@@ -1,0 +1,14 @@
+# Credentials come from the environment; nothing secret lives in the repo.
+tidewater:
+  target: "{{ env_var('DBT_TARGET', 'postgres') }}"
+  outputs:
+    postgres:
+      type: postgres
+      host: "{{ env_var('WH_PGHOST', 'localhost') }}"
+      port: "{{ env_var('WH_PGPORT', '5434') | int }}"
+      user: "{{ env_var('WH_PGUSER', 'warehouse') }}"
+      password: "{{ env_var('WH_PGPASSWORD', 'warehouse') }}"
+      dbname: "{{ env_var('WH_PGDATABASE', 'analytics') }}"
+      schema: public
+      threads: 4
+    # snowflake: added in week 9 (benchmarks). Same models, `--target snowflake`.

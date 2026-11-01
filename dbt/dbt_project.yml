@@ -1,0 +1,17 @@
+name: tidewater
+version: "0.1.0"
+config-version: 2
+profile: tidewater
+
+model-paths: ["models"]
+macro-paths: ["macros"]
+test-paths: ["tests"]
+snapshot-paths: ["snapshots"]
+target-path: target
+clean-targets: [target, dbt_packages]
+
+models:
+  tidewater:
+    staging:
+      +schema: staging
+      +materialized: view

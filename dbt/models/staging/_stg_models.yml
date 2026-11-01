@@ -1,0 +1,70 @@
+version: 2
+
+models:
+  - name: stg_customers
+    description: Live customers (soft deletes removed), one row per customer.
+    columns:
+      - name: customer_id
+        data_tests: [unique, not_null]
+      - name: email
+        data_tests: [unique, not_null]
+
+  - name: stg_products
+    description: Live product catalog.
+    columns:
+      - name: product_id
+        data_tests: [unique, not_null]
+      - name: sku
+        data_tests: [unique, not_null]
+      - name: unit_price
+        data_tests:
+          - dbt_utils.accepted_range: {min_value: 0}
+
+  - name: stg_orders
+    description: Live orders with their current status.
+    columns:
+      - name: order_id
+        data_tests: [unique, not_null]
+      - name: customer_id
+        data_tests:
+          - not_null
+          - relationships: {to: ref('stg_customers'), field: customer_id}
+      - name: order_status
+        data_tests:
+          - accepted_values:
+              values: [placed, paid, shipped, delivered, cancelled, refunded]
+      - name: order_total
+        data_tests:
+          - dbt_utils.accepted_range: {min_value: 0}
+
+  - name: stg_order_items
+    description: Order lines. line_total = quantity * unit_price at order time.
+    columns:
+      - name: order_item_id
+        data_tests: [unique, not_null]
+      - name: order_id
+        data_tests:
+          - not_null
+          - relationships: {to: ref('stg_orders'), field: order_id}
+      - name: product_id
+        data_tests:
+          - relationships: {to: ref('stg_products'), field: product_id}
+      - name: quantity
+        data_tests:
+          - dbt_utils.accepted_range: {min_value: 1}
+
+  - name: stg_payments
+    description: Payments; refunds are negative rows with payment_status = 'refunded'.
+    columns:
+      - name: payment_id
+        data_tests: [unique, not_null]
+      - name: order_id
+        data_tests:
+          - not_null
+          - relationships: {to: ref('stg_orders'), field: order_id}
+      - name: payment_method
+        data_tests:
+          - accepted_values: {values: [card, paypal, gift_card, bank_transfer]}
+      - name: payment_status
+        data_tests:
+          - accepted_values: {values: [authorized, captured, refunded, failed]}

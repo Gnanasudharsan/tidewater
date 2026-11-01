@@ -1,0 +1,22 @@
+version: 2
+
+sources:
+  - name: silver
+    description: >
+      Silver tables loaded from the lakehouse by spark/jobs/load_warehouse.py.
+      One row per source primary key, soft-deleted rows included (is_deleted).
+    schema: silver
+    loaded_at_field: _silver_updated_at
+    freshness:
+      warn_after: {count: 15, period: minute}
+      error_after: {count: 60, period: minute}
+    tables:
+      - name: customers
+      - name: products
+        # The catalog changes rarely, so it is allowed to be staler.
+        freshness:
+          warn_after: {count: 6, period: hour}
+          error_after: {count: 24, period: hour}
+      - name: orders
+      - name: order_items
+      - name: payments
