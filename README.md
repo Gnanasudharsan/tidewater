@@ -13,7 +13,7 @@ Postgres 16 (WAL) ──▶ Debezium 2.7 ──▶ Kafka 3.7 (KRaft) ──▶ S
    simulator                           (Avro, BACKWARD)
 ```
 
-> 🚧 **Work in progress.** Weeks 0–4 (foundation, CDC, bronze, silver) are done. See [Roadmap](#roadmap).
+> 🚧 **Work in progress.** Weeks 0–5 (foundation, CDC, bronze, silver, warehouse + dbt staging) are done; the silver soak test is pending. See [Roadmap](#roadmap).
 
 ## Results
 
@@ -43,6 +43,11 @@ make reconcile            # prove silver matches the source DB: counts + per-row
 make backfill ARGS="--table orders"   # backfill from the source while the stream runs
 make chaos-bronze         # SIGKILL the stream mid-batch under load, then verify
 make soak DURATION=3600   # an hour of load + a concurrent backfill, then reconcile
+
+docker compose up -d postgres-wh   # warehouse (Metabase comes in week 6)
+make load-wh              # silver -> Postgres warehouse, incremental by Delta version
+make dbt-build            # dbt staging models + 29 data tests
+make dbt-freshness        # is the warehouse keeping up?
 ```
 
 Then open **Kafka UI at http://localhost:8080** and watch change events stream into
@@ -56,6 +61,7 @@ Then open **Kafka UI at http://localhost:8080** and watch change events stream i
 | Schema registry (Apicurio) | http://localhost:8081 |
 | S3 endpoint / filer UI | http://localhost:8333 / http://localhost:8888 |
 | Source Postgres | `localhost:5432` (`make psql-src`) |
+| Warehouse Postgres | `localhost:5434` (`make psql-wh`) |
 
 ### Compose profiles (8 GB laptops)
 
@@ -75,6 +81,7 @@ Then open **Kafka UI at http://localhost:8080** and watch change events stream i
 | Deletes propagate, history kept | Soft deletes; a stale update after a delete is rejected ([ADR 0002](docs/adr/0002-soft-deletes.md)) | delete tests + [reconcile](spark/jobs/reconcile.py) |
 | Silver matches the source exactly | Row counts + SHA-256 of every column of every row | [`reconcile.py`](spark/jobs/reconcile.py) |
 | Bad data never reaches silver silently | YAML DQ rules ([contracts](spark/conf/silver_tables.yml)); undecodable or failing rows → `_quarantine` with reasons | [DQ](spark/tests/test_dq.py) + [decode](spark/tests/test_cdc_decode.py) tests |
+| Warehouse never skips or regresses a row | Loads by Delta version via Change Data Feed; upsert + bookmark in one transaction, LSN-guarded ([ADR 0008](docs/adr/0008-warehouse-load-by-delta-version.md)) | [loader SQL](tests/unit/test_warehouse_sql.py) + [CDF](spark/tests/test_cdf.py) tests; dbt tests |
 | Late data is recorded, not dropped | Lateness by LSN, not by watermark ([ADR 0007](docs/adr/0007-late-data-by-lsn-not-watermark.md)) | `classify` tests |
 | Safe schema evolution | Avro + registry in BACKWARD mode | chaos test "add column live" _(week 8)_ |
 
@@ -87,7 +94,8 @@ Then open **Kafka UI at http://localhost:8080** and watch change events stream i
   [Medallion layering](docs/adr/0004-medallion-layering.md) ·
   [Postgres dev / Snowflake bench](docs/adr/0005-postgres-dev-snowflake-bench.md) ·
   [SeaweedFS over MinIO](docs/adr/0006-seaweedfs-over-minio.md) ·
-  [Late data by LSN](docs/adr/0007-late-data-by-lsn-not-watermark.md)
+  [Late data by LSN](docs/adr/0007-late-data-by-lsn-not-watermark.md) ·
+  [Warehouse load by Delta version](docs/adr/0008-warehouse-load-by-delta-version.md)
 - [Runbooks](docs/runbooks/) · [Dev log](docs/devlog.md)
 
 ## Repository layout
@@ -99,7 +107,7 @@ infra/        Postgres init SQL (source + warehouse)
 scripts/      connector registration, soak test
 simulator/    Python + Faker transaction generator
 spark/        Spark image; bronze + silver streams, backfill, reconcile; DQ contracts in conf/
-dbt/          staging, dims, facts, metrics           (week 5+)
+dbt/          sources + freshness, staging models, tests (dims/facts in week 6)
 airflow/      DAGs                                    (week 7)
 terraform/    S3 buckets, Snowflake objects           (week 7+)
 tests/        unit and chaos tests (integration in week 7)
@@ -111,7 +119,7 @@ tests/        unit and chaos tests (integration in week 7)
 - [x] **Week 1:** source schema, simulator, Debezium CDC, schema registry (BACKWARD)
 - [x] **Week 2:** bronze (Kafka → Delta, append-only, idempotent writes, offset-gap checker, chaos test 01)
 - [~] **Weeks 3–4:** silver built and reconciled 100% on a 77k-event backlog; the hour-long soak with a concurrent backfill is still to run
-- [ ] **Week 5:** warehouse load and dbt staging
+- [x] **Week 5:** incremental warehouse load (Delta CDF), dbt staging models, source freshness, 29 data tests
 - [ ] **Week 6:** dimensional model, SCD2, MetricFlow, Metabase
 - [ ] **Week 7:** Airflow, CI integration test, Terraform
 - [ ] **Week 8:** Grafana, lineage, chaos suite, runbooks

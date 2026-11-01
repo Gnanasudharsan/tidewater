@@ -2,6 +2,24 @@
 
 Bugs hit, root causes, and fixes. Newest first.
 
+## 2026-11-01: Week 5, warehouse load and dbt staging
+- **Avoided a classic incremental-load bug by design.** A watermark on
+  `_silver_updated_at` can skip rows when two writers (stream and backfill)
+  commit out of timestamp order. The loader bookmarks Delta versions and reads the
+  Change Data Feed instead. (ADR 0008.)
+- **A test caught a fallback that could never run.** When the CDF range is
+  unavailable, the loader is supposed to fall back to a full load. But Spark
+  plans lazily, so the "change data not recorded" error was raised later, at
+  `count()`, outside the `try`. The loader would have crashed instead.
+  Fix: resolve the range inside the `try` with `limit(1).collect()`.
+- **"Missing" warehouse rows were only lag.** Right after a burst, the warehouse
+  had ~2% fewer live rows than the source. Reconciliation showed silver at 100%,
+  and the missing keys were all created in the last seconds of the burst, so
+  silver hadn't merged them yet when the loader ran. The next run matched exactly.
+  Freshness thresholds in dbt now watch for exactly this lag.
+- Port 5433 was taken by another local Postgres, so the warehouse host port is
+  now configurable (`WH_PG_HOST_PORT`, default 5434).
+
 ## 2026-11-01: Weeks 3–4, silver layer
 - **The soak test didn't finish: the laptop kept sleeping.** A 10-minute soak
   stretched over 8 hours of wall time as macOS slept and froze the Docker VM
