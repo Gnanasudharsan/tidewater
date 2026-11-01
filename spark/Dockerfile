@@ -17,6 +17,7 @@ RUN cd /opt/spark/jars && for path in \
       org/apache/commons/commons-pool2/2.11.1/commons-pool2-2.11.1.jar \
       org/apache/hadoop/hadoop-aws/3.3.4/hadoop-aws-3.3.4.jar \
       com/amazonaws/aws-java-sdk-bundle/1.12.262/aws-java-sdk-bundle-1.12.262.jar \
+      org/postgresql/postgresql/42.7.4/postgresql-42.7.4.jar \
     ; do curl -fsSLO "${MAVEN}/${path}"; done
 
 COPY log4j2.properties /opt/spark/conf/log4j2.properties
@@ -28,6 +29,7 @@ RUN pip install --no-cache-dir -r /tmp/requirements.txt \
 WORKDIR /opt/tidewater
 COPY tidewater_spark ./tidewater_spark
 COPY jobs ./jobs
+COPY conf ./conf
 COPY tests ./tests
 ENV PYTHONPATH=/opt/tidewater:/opt/spark/python:/opt/spark/python/lib/py4j-0.10.9.7-src.zip
 

@@ -180,6 +180,14 @@ services:
       BRONZE_TRIGGER: ${BRONZE_TRIGGER:-5 seconds}
       BRONZE_TXN_APP_ID: ${BRONZE_TXN_APP_ID:-bronze_cdc_v1}
       BRONZE_CHAOS_CRASH_AFTER_COMMIT: ${BRONZE_CHAOS_CRASH_AFTER_COMMIT:-0}
+      SCHEMA_REGISTRY_URL: http://schema-registry:8080/apis/ccompat/v7
+      SILVER_TRIGGER: ${SILVER_TRIGGER:-10 seconds}
+      SILVER_TXN_APP_ID: ${SILVER_TXN_APP_ID:-silver_v1}
+      PGHOST: postgres-src
+      PGPORT: 5432
+      PGDATABASE: ${SRC_PG_DB}
+      PGUSER: ${SRC_PG_USER}
+      PGPASSWORD: ${SRC_PG_PASSWORD}
     command:
       - /opt/spark/bin/spark-submit
       - --master
@@ -188,6 +196,28 @@ services:
       - 1200m
       - jobs/bronze_ingest.py
     ports: ["4040:4040"]
+    restart: unless-stopped
+    mem_limit: 2g
+    logging: *default-logging
+
+  spark-silver:
+    # Bronze -> silver: decode, DQ, dedupe, LSN-guarded MERGE into per-table Delta.
+    image: tidewater-spark:local
+    profiles: ["core", "all"]
+    depends_on:
+      spark-bronze: { condition: service_started }
+      schema-registry: { condition: service_healthy }
+    environment: *spark-env
+    command:
+      - /opt/spark/bin/spark-submit
+      - --master
+      - local[2]
+      - --driver-memory
+      - 1200m
+      - --conf
+      - spark.ui.port=4041
+      - jobs/silver_stream.py
+    ports: ["4041:4041"]
     restart: unless-stopped
     mem_limit: 2g
     logging: *default-logging

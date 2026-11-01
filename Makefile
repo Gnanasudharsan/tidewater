@@ -8,7 +8,7 @@ DURATION ?= 0
 
 .DEFAULT_GOAL := help
 .PHONY: help init up-core up-wh up-all down nuke ps logs register sim sim-burst \
-        psql-src psql-wh topics test test-spark verify-bronze chaos-bronze lint fmt pre-commit
+        psql-src psql-wh topics test test-spark verify-bronze chaos-bronze backfill reconcile soak lint fmt pre-commit
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-12s\033[0m %s\n",$$1,$$2}'
@@ -21,7 +21,7 @@ init: ## Create .env from the example and install dev tooling
 .env:
 	cp .env.example .env
 
-up-core: .env ## Start source DB, Kafka, Debezium, registry, S3 store, Kafka UI, bronze stream (~6 GB)
+up-core: .env ## Start source DB, Kafka, Debezium, registry, S3, Kafka UI, bronze + silver streams
 	$(COMPOSE) --profile core up -d --wait
 	@echo "Kafka UI: http://localhost:8080  S3: http://localhost:8333 (filer UI :8888)  Connect: http://localhost:8083"
 
@@ -67,7 +67,18 @@ test-spark: ## Run Spark unit tests inside the Spark image
 	$(SPARK_RUN) python3 -m pytest -q -p no:cacheprovider tests
 
 verify-bronze: ## Check bronze has every Kafka offset exactly once (add ARGS=--require-caught-up)
-	$(SPARK_RUN) /opt/spark/bin/spark-submit --master 'local[2]' --driver-memory 1g jobs/verify_bronze.py $(ARGS)
+	$(SPARK_RUN) $(SUBMIT) jobs/verify_bronze.py $(ARGS)
+
+SUBMIT := /opt/spark/bin/spark-submit --master 'local[2]' --driver-memory 1g
+
+backfill: ## Backfill silver from source while the stream runs (ARGS="--table orders --detect-deletes")
+	$(SPARK_RUN) $(SUBMIT) jobs/backfill.py $(ARGS)
+
+reconcile: ## Compare silver to the source DB: counts + per-row hashes (run when source is quiet)
+	$(SPARK_RUN) $(SUBMIT) jobs/reconcile.py $(ARGS)
+
+soak: ## Load test: simulator + mid-run concurrent backfill, then verify bronze and reconcile silver
+	./scripts/soak.sh $(or $(DURATION),600) $(or $(SOAK_RATE),50)
 
 chaos-bronze: ## Chaos test 01: SIGKILL bronze mid-batch N times, then verify (KILLS=3 CHAOS_RATE=100)
 	./tests/chaos/01_kill_bronze_mid_batch.sh $(KILLS) $(CHAOS_RATE)
