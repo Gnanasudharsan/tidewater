@@ -61,6 +61,7 @@ Each has an ADR in [`docs/adr/`](adr/):
 4. [Medallion layering](adr/0004-medallion-layering.md)
 5. [Postgres for dev, Snowflake for benchmarks](adr/0005-postgres-dev-snowflake-bench.md)
 6. [SeaweedFS instead of MinIO for local S3](adr/0006-seaweedfs-over-minio.md)
+7. [Detect late data by LSN instead of dropping it by watermark](adr/0007-late-data-by-lsn-not-watermark.md)
 
 ### Correctness model (summary)
 
@@ -74,6 +75,8 @@ Each has an ADR in [`docs/adr/`](adr/):
   at-least-once delivery into exactly-once results.
 - The **backfill job** calls the same merge function, so it is safe to run
   concurrently with the stream (Delta optimistic concurrency + LSN guard).
+  It waits for a transaction horizon before reading so its LSN stamp is honest
+  (ADR 0003), merges in small chunks, and retries write conflicts.
 
 ## 5. Non-goals
 

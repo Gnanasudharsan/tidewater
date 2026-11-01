@@ -2,6 +2,38 @@
 
 Bugs hit, root causes, and fixes. Newest first.
 
+## 2026-11-01: Weeks 3–4, silver layer
+- **The soak test didn't finish: the laptop kept sleeping.** A 10-minute soak
+  stretched over 8 hours of wall time as macOS slept and froze the Docker VM
+  (simulator logs show gaps like 05:27 → 06:11 UTC). Every component resumed
+  cleanly after each freeze, and the concurrent backfill got through its
+  transaction-horizon wait and merged `customers` with 0 conflicts, but the run
+  never reached reconciliation. Its latency numbers would be meaningless anyway.
+  To do: rerun `make soak DURATION=3600` on a machine that stays awake.
+- **Silver crash-looped with `OutOfMemoryError` inside Avro's `readString`, on a
+  77k-event backlog.** Every bronze record decoded fine on its own with FAILFAST,
+  so the data was not the problem. Cause: decoding was written as
+  `filter(schema_id == 9)` and then `from_avro(...)`, followed by a filter on a
+  decoded field. Spark combined the two filters and did not evaluate the schema
+  check first, so `from_avro` ran on *other tables'* bytes with the orders schema,
+  read a garbage string length, and tried to allocate gigabytes. Single-table
+  probes never showed it because no foreign bytes were present. Fix: put the
+  guard inside the expression, `CASE WHEN schema_id = 9 THEN from_avro(...)`,
+  which Spark does evaluate lazily. Lesson: a filter is not a guard in Spark.
+- **The Avro envelope references the Debezium `Source` record by name** (Apicurio
+  stores it as its own artifact, a schema reference). `from_avro` needs one
+  self-contained schema, so the registry client fetches references and inlines
+  the first use of each type.
+- **The backfill LSN stamp needs a transaction horizon.** Capturing
+  `pg_current_wal_lsn()` and reading is not enough: a transaction that wrote a
+  change below that LSN but had not committed yet would be invisible to the read,
+  and its stream event would then lose to the backfill's stamp. The backfill
+  captures the LSN, then the next xid, and waits until every older transaction has
+  finished. (ADR 0003.)
+- **No watermark in silver.** A watermark drops late data, which contradicts the
+  100% reconciliation SLO. Late data is now detected exactly, by LSN, and
+  recorded. (ADR 0007.)
+
 ## 2026-10-31: Week 2, bronze layer
 - **Checkpoint writes failed with `ParentNotDirectoryException: parent is not a dir`.**
   A probe showed that after `mkdirs("dir1")`, S3A's `getFileStatus("dir1")` reports

@@ -13,7 +13,7 @@ Postgres 16 (WAL) ──▶ Debezium 2.7 ──▶ Kafka 3.7 (KRaft) ──▶ S
    simulator                           (Avro, BACKWARD)
 ```
 
-> 🚧 **Work in progress.** Weeks 0–2 (foundation, CDC, bronze layer) are done. See [Roadmap](#roadmap).
+> 🚧 **Work in progress.** Weeks 0–4 (foundation, CDC, bronze, silver) are done. See [Roadmap](#roadmap).
 
 ## Results
 
@@ -23,6 +23,7 @@ _Benchmarks land in week 9. No numbers are claimed here until they are measured.
 |---|---|---|
 | p95 source → silver latency | < 60 s | — |
 | Duplicate or missing offsets in bronze after crashes | 0 | **0** across 76,789 events, 3 mid-batch SIGKILLs + 1 post-commit crash ([chaos 01](tests/chaos/01_kill_bronze_mid_batch.sh)) |
+| Silver vs. source reconciliation (counts + per-row SHA-256) | 100% | **100%** on all 5 tables, 49,494 rows, after a 77k-event backlog |
 | Duplicate PKs in silver after chaos tests | 0 | — |
 | Source reconciliation | 100% | — |
 | Throughput | — | — |
@@ -38,7 +39,10 @@ make up-core              # Postgres, Kafka, Debezium, schema registry, S3, Kafk
 make register             # BACKWARD compatibility rule + Debezium connector
 make sim RATE=50          # generate live e-commerce traffic (Ctrl-C to stop)
 make verify-bronze        # prove bronze holds every Kafka offset exactly once
+make reconcile            # prove silver matches the source DB: counts + per-row hashes
+make backfill ARGS="--table orders"   # backfill from the source while the stream runs
 make chaos-bronze         # SIGKILL the stream mid-batch under load, then verify
+make soak DURATION=3600   # an hour of load + a concurrent backfill, then reconcile
 ```
 
 Then open **Kafka UI at http://localhost:8080** and watch change events stream into
@@ -47,7 +51,7 @@ Then open **Kafka UI at http://localhost:8080** and watch change events stream i
 | Service | URL |
 |---|---|
 | Kafka UI | http://localhost:8080 |
-| Spark UI (bronze stream) | http://localhost:4040 |
+| Spark UI (bronze / silver streams) | http://localhost:4040 / http://localhost:4041 |
 | Kafka Connect REST | http://localhost:8083 |
 | Schema registry (Apicurio) | http://localhost:8081 |
 | S3 endpoint / filer UI | http://localhost:8333 / http://localhost:8888 |
@@ -66,9 +70,12 @@ Then open **Kafka UI at http://localhost:8080** and watch change events stream i
 | Guarantee | Mechanism | Proof |
 |---|---|---|
 | Bronze has every Kafka record exactly once | Streaming checkpoint + Delta idempotent writes (`txnAppId`, `txnVersion = batch_id`) | [chaos 01](tests/chaos/01_kill_bronze_mid_batch.sh) kills mid-batch and right after the Delta commit, then [`verify_bronze.py`](spark/jobs/verify_bronze.py) checks every partition for duplicates and gaps |
-| No duplicates | Silver `MERGE` on PK, guarded by `incoming.lsn > target.lsn` | unit tests + chaos suite _(weeks 3–8)_ |
-| Correct order under replays and backfills | WAL LSN ordering ([ADR 0003](docs/adr/0003-lsn-based-ordering.md)) | out-of-order unit tests _(weeks 3–4)_ |
-| Deletes propagate, history kept | Soft deletes ([ADR 0002](docs/adr/0002-soft-deletes.md)) | reconciliation _(weeks 3–4)_ |
+| One row per key, newest version wins | Silver `MERGE` applies a change only if `(lsn, offset)` is newer than the stored row | [merge tests](spark/tests/test_silver_merge.py): dedup, out-of-order, replay-twice, ties |
+| Correct under replays and concurrent backfills | WAL LSN ordering, plus a transaction horizon before the backfill reads ([ADR 0003](docs/adr/0003-lsn-based-ordering.md)) | [soak](scripts/soak.sh): full backfill during live load, then reconcile _(soak run pending; see devlog)_ |
+| Deletes propagate, history kept | Soft deletes; a stale update after a delete is rejected ([ADR 0002](docs/adr/0002-soft-deletes.md)) | delete tests + [reconcile](spark/jobs/reconcile.py) |
+| Silver matches the source exactly | Row counts + SHA-256 of every column of every row | [`reconcile.py`](spark/jobs/reconcile.py) |
+| Bad data never reaches silver silently | YAML DQ rules ([contracts](spark/conf/silver_tables.yml)); undecodable or failing rows → `_quarantine` with reasons | [DQ](spark/tests/test_dq.py) + [decode](spark/tests/test_cdc_decode.py) tests |
+| Late data is recorded, not dropped | Lateness by LSN, not by watermark ([ADR 0007](docs/adr/0007-late-data-by-lsn-not-watermark.md)) | `classify` tests |
 | Safe schema evolution | Avro + registry in BACKWARD mode | chaos test "add column live" _(week 8)_ |
 
 ## Design docs
@@ -79,7 +86,8 @@ Then open **Kafka UI at http://localhost:8080** and watch change events stream i
   [LSN ordering](docs/adr/0003-lsn-based-ordering.md) ·
   [Medallion layering](docs/adr/0004-medallion-layering.md) ·
   [Postgres dev / Snowflake bench](docs/adr/0005-postgres-dev-snowflake-bench.md) ·
-  [SeaweedFS over MinIO](docs/adr/0006-seaweedfs-over-minio.md)
+  [SeaweedFS over MinIO](docs/adr/0006-seaweedfs-over-minio.md) ·
+  [Late data by LSN](docs/adr/0007-late-data-by-lsn-not-watermark.md)
 - [Runbooks](docs/runbooks/) · [Dev log](docs/devlog.md)
 
 ## Repository layout
@@ -88,9 +96,9 @@ Then open **Kafka UI at http://localhost:8080** and watch change events stream i
 connect/      Debezium connector config
 docs/         design doc, ADRs, runbooks, dev log
 infra/        Postgres init SQL (source + warehouse)
-scripts/      operational scripts (connector registration, reconciliation)
+scripts/      connector registration, soak test
 simulator/    Python + Faker transaction generator
-spark/        Spark image, bronze stream, verifier    (silver in weeks 3–4)
+spark/        Spark image; bronze + silver streams, backfill, reconcile; DQ contracts in conf/
 dbt/          staging, dims, facts, metrics           (week 5+)
 airflow/      DAGs                                    (week 7)
 terraform/    S3 buckets, Snowflake objects           (week 7+)
@@ -102,7 +110,7 @@ tests/        unit and chaos tests (integration in week 7)
 - [x] **Week 0:** design doc, ADRs, repo tooling
 - [x] **Week 1:** source schema, simulator, Debezium CDC, schema registry (BACKWARD)
 - [x] **Week 2:** bronze (Kafka → Delta, append-only, idempotent writes, offset-gap checker, chaos test 01)
-- [ ] **Weeks 3–4:** silver (dedup, LSN-guarded MERGE, soft deletes, DQ, backfill, reconciliation)
+- [~] **Weeks 3–4:** silver built and reconciled 100% on a 77k-event backlog; the hour-long soak with a concurrent backfill is still to run
 - [ ] **Week 5:** warehouse load and dbt staging
 - [ ] **Week 6:** dimensional model, SCD2, MetricFlow, Metabase
 - [ ] **Week 7:** Airflow, CI integration test, Terraform
