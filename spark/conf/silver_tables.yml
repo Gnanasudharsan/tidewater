@@ -1,0 +1,46 @@
+# Silver table contracts: primary key + data-quality rules per source table.
+# Rows that fail any rule go to the quarantine table with every failed rule name.
+# Rule types: not_null | accepted_values | range (min/max) | regex | expression (Spark SQL).
+tables:
+  customers:
+    primary_key: [customer_id]
+    rules:
+      - {name: email_not_null, type: not_null, column: email}
+      - {name: email_format, type: regex, column: email, pattern: '^[^@\s]+@[^@\s]+\.[^@\s]+$'}
+      - {name: full_name_not_null, type: not_null, column: full_name}
+      - {name: state_is_code, type: regex, column: state, pattern: '^[A-Z]{2}$'}
+
+  products:
+    primary_key: [product_id]
+    rules:
+      - {name: sku_format, type: regex, column: sku, pattern: '^SKU-[0-9]{6}$'}
+      - {name: unit_price_non_negative, type: range, column: unit_price, min: 0}
+
+  orders:
+    primary_key: [order_id]
+    rules:
+      - {name: customer_id_not_null, type: not_null, column: customer_id}
+      - name: status_valid
+        type: accepted_values
+        column: status
+        values: [placed, paid, shipped, delivered, cancelled, refunded]
+      - {name: order_total_non_negative, type: range, column: order_total, min: 0}
+      - {name: currency_iso, type: regex, column: currency, pattern: '^[A-Z]{3}$'}
+
+  order_items:
+    primary_key: [order_item_id]
+    rules:
+      - {name: order_id_not_null, type: not_null, column: order_id}
+      - {name: quantity_positive, type: range, column: quantity, min: 1}
+      - {name: unit_price_non_negative, type: range, column: unit_price, min: 0}
+
+  payments:
+    primary_key: [payment_id]
+    rules:
+      - {name: order_id_not_null, type: not_null, column: order_id}
+      - name: method_valid
+        type: accepted_values
+        column: method
+        values: [card, paypal, gift_card, bank_transfer]
+      # Refunds are stored as negative payment rows.
+      - {name: amount_sign_matches_status, type: expression, expr: "(status = 'refunded') = (amount < 0)"}
