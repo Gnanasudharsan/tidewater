@@ -3,7 +3,6 @@
 import datetime as dt
 
 import pytest
-from pyspark.sql import SparkSession
 from pyspark.sql import types as T
 
 from tidewater_spark.bronze import to_bronze
@@ -18,13 +17,6 @@ KAFKA_SCHEMA = T.StructType(
         T.StructField("timestamp", T.TimestampType()),
     ]
 )
-
-
-@pytest.fixture(scope="session")
-def spark():
-    s = SparkSession.builder.master("local[1]").appName("tests").getOrCreate()
-    yield s
-    s.stop()
 
 
 def kafka_row(value, topic="tidewater.public.orders", offset=0):
