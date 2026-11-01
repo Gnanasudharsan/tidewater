@@ -8,7 +8,7 @@ DURATION ?= 0
 
 .DEFAULT_GOAL := help
 .PHONY: help init up-core up-wh up-all down nuke ps logs register sim sim-burst \
-        psql-src psql-wh topics test test-spark verify-bronze chaos-bronze backfill reconcile soak lint fmt pre-commit
+        psql-src psql-wh topics test test-spark verify-bronze chaos-bronze backfill reconcile soak load-wh dbt dbt-build dbt-freshness lint fmt pre-commit
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-12s\033[0m %s\n",$$1,$$2}'
@@ -76,6 +76,21 @@ backfill: ## Backfill silver from source while the stream runs (ARGS="--table or
 
 reconcile: ## Compare silver to the source DB: counts + per-row hashes (run when source is quiet)
 	$(SPARK_RUN) $(SUBMIT) jobs/reconcile.py $(ARGS)
+
+load-wh: ## Incrementally load silver into the Postgres warehouse (ARGS="--interval 60" to loop)
+	$(SPARK_RUN) $(SUBMIT) jobs/load_warehouse.py $(ARGS)
+
+DBT := $(COMPOSE) --profile wh run --rm --build dbt
+
+dbt: ## Run any dbt command, e.g. make dbt CMD="run -s stg_orders"
+	$(DBT) $(CMD)
+
+dbt-build: ## Install dbt packages, then build and test every model
+	$(DBT) deps
+	$(DBT) build
+
+dbt-freshness: ## Check silver source freshness thresholds
+	$(DBT) source freshness
 
 soak: ## Load test: simulator + mid-run concurrent backfill, then verify bronze and reconcile silver
 	./scripts/soak.sh $(or $(DURATION),600) $(or $(SOAK_RATE),50)

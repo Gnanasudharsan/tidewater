@@ -22,6 +22,9 @@ def build_spark(app_name: str, settings: Settings) -> SparkSession:
             "spark.sql.streaming.checkpointFileManagerClass",
             "org.apache.spark.sql.execution.streaming.FileSystemBasedCheckpointFileManager",
         )
+        # Every new Delta table records row-level changes, so the warehouse loader
+        # can read exactly what changed between two versions.
+        .config("spark.databricks.delta.properties.defaults.enableChangeDataFeed", "true")
         # Let MERGE add columns that appear at the source (schema evolution).
         .config("spark.databricks.delta.schema.autoMerge.enabled", "true")
         # S3A against any S3-compatible endpoint. On AWS, drop the endpoint and path-style lines.

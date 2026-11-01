@@ -188,6 +188,11 @@ services:
       PGDATABASE: ${SRC_PG_DB}
       PGUSER: ${SRC_PG_USER}
       PGPASSWORD: ${SRC_PG_PASSWORD}
+      WH_PGHOST: postgres-wh
+      WH_PGPORT: 5432
+      WH_PGDATABASE: ${WH_PG_DB}
+      WH_PGUSER: ${WH_PG_USER}
+      WH_PGPASSWORD: ${WH_PG_PASSWORD}
     command:
       - /opt/spark/bin/spark-submit
       - --master
@@ -246,7 +251,7 @@ services:
       POSTGRES_USER: ${WH_PG_USER}
       POSTGRES_PASSWORD: ${WH_PG_PASSWORD}
       POSTGRES_DB: ${WH_PG_DB}
-    ports: ["5433:5432"]
+    ports: ["${WH_PG_HOST_PORT:-5434}:5432"]
     volumes:
       - pg-wh-data:/var/lib/postgresql/data
       - ./infra/postgres-wh/init:/docker-entrypoint-initdb.d:ro
@@ -255,6 +260,25 @@ services:
       interval: 5s
       retries: 20
     mem_limit: 768m
+    logging: *default-logging
+
+  dbt:
+    build: ./dbt
+    image: tidewater-dbt:local
+    profiles: ["wh", "all"]
+    depends_on:
+      postgres-wh: { condition: service_healthy }
+    environment:
+      WH_PGHOST: postgres-wh
+      WH_PGPORT: 5432
+      WH_PGDATABASE: ${WH_PG_DB}
+      WH_PGUSER: ${WH_PG_USER}
+      WH_PGPASSWORD: ${WH_PG_PASSWORD}
+    volumes:
+      - ./dbt:/dbt
+    entrypoint: ["dbt"]
+    command: ["--version"]
+    mem_limit: 512m
     logging: *default-logging
 
   metabase:

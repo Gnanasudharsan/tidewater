@@ -38,6 +38,11 @@ class Settings:
     pg_db: str = "shop"
     pg_user: str = ""
     pg_password: str = ""
+    wh_host: str = "postgres-wh"
+    wh_port: int = 5432
+    wh_db: str = "analytics"
+    wh_user: str = ""
+    wh_password: str = ""
 
     @property
     def lakehouse(self) -> str:
@@ -78,6 +83,18 @@ class Settings:
             "driver": "org.postgresql.Driver",
         }
 
+    @property
+    def wh_jdbc_url(self) -> str:
+        return f"jdbc:postgresql://{self.wh_host}:{self.wh_port}/{self.wh_db}"
+
+    @property
+    def wh_jdbc_props(self) -> dict[str, str]:
+        return {
+            "user": self.wh_user,
+            "password": self.wh_password,
+            "driver": "org.postgresql.Driver",
+        }
+
     @classmethod
     def from_env(cls) -> Settings:
         return cls(
@@ -101,4 +118,9 @@ class Settings:
             pg_db=_env("PGDATABASE", "shop"),
             pg_user=_env("PGUSER", ""),
             pg_password=_env("PGPASSWORD", ""),
+            wh_host=_env("WH_PGHOST", "postgres-wh"),
+            wh_port=int(_env("WH_PGPORT", "5432")),
+            wh_db=_env("WH_PGDATABASE", "analytics"),
+            wh_user=_env("WH_PGUSER", ""),
+            wh_password=_env("WH_PGPASSWORD", ""),
         )
