@@ -236,6 +236,46 @@ services:
     mem_limit: 2g
     logging: *default-logging
 
+  # ---------------------------------------------------------------- orchestration
+  docker-proxy:
+    # Airflow launches job containers through this proxy, which exposes only the
+    # container and image APIs instead of handing Airflow the full Docker socket.
+    image: tecnativa/docker-socket-proxy:0.3.0
+    profiles: ["orch", "all"]
+    environment:
+      CONTAINERS: 1
+      IMAGES: 1
+      POST: 1
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    restart: unless-stopped
+    mem_limit: 64m
+    logging: *default-logging
+
+  airflow:
+    image: apache/airflow:2.10.4-python3.11
+    profiles: ["orch", "all"]
+    depends_on:
+      postgres-wh: { condition: service_healthy }
+      docker-proxy: { condition: service_started }
+    command: standalone
+    environment:
+      <<: *spark-env
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres-wh:5432/airflow
+      AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "false"
+      AIRFLOW_CONN_WAREHOUSE: postgresql://${WH_PG_USER}:${WH_PG_PASSWORD}@postgres-wh:5432/${WH_PG_DB}
+      TIDEWATER_DOCKER_URL: tcp://docker-proxy:2375
+      TIDEWATER_NETWORK: ${COMPOSE_PROJECT_NAME}_default
+    ports: ["8085:8080"]
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+    restart: unless-stopped
+    mem_limit: 2g
+    logging: *default-logging
+
   # ---------------------------------------------------------------- tools
   simulator:
     build: ./simulator
