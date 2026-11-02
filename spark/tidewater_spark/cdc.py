@@ -6,7 +6,8 @@ from pyspark.sql import Column, DataFrame
 from pyspark.sql import functions as F
 from pyspark.sql.avro.functions import from_avro
 
-from tidewater_spark.registry import SchemaRegistry, row_temporal_fields
+from tidewater_spark.registry import row_temporal_fields
+from tidewater_spark.schema_archive import LEGACY_RUN
 
 # Silver bookkeeping columns. Everything else in a silver table is a source column.
 META_COLUMNS = [
@@ -49,7 +50,13 @@ def silver_columns(df: DataFrame) -> list[str]:
     return business_columns(df) + [c for c in META_COLUMNS if c in df.columns]
 
 
-def decode_schema_group(bronze: DataFrame, schema_id: int, schema_json: str) -> DataFrame:
+def ingest_run(df: DataFrame) -> Column:
+    """The bronze ingest run of each row (rows from before runs were tagged are v1)."""
+    tag = F.col("_ingest_run") if "_ingest_run" in df.columns else F.lit(None).cast("string")
+    return F.coalesce(tag, F.lit(LEGACY_RUN))
+
+
+def decode_schema_group(bronze: DataFrame, run: str, schema_id: int, schema_json: str) -> DataFrame:
     """Decode rows written with one schema id. Returns rows plus `_decoded_ok`.
 
     The schema-id check lives INSIDE the expression (CASE WHEN), not only in a
@@ -61,7 +68,10 @@ def decode_schema_group(bronze: DataFrame, schema_id: int, schema_json: str) -> 
     decoded = from_avro(F.expr("substring(value, 6)"), schema_json, {"mode": "PERMISSIVE"})
     env = bronze.select(
         *LINEAGE,
-        F.when(F.col("_value_schema_id") == F.lit(schema_id), decoded).alias("e"),
+        F.when(
+            (F.col("_value_schema_id") == F.lit(schema_id)) & (ingest_run(bronze) == F.lit(run)),
+            decoded,
+        ).alias("e"),
     )
     row_fields = env.schema["e"].dataType["before"].dataType.fieldNames()
     # Deletes carry the last row image in `before` (REPLICA IDENTITY FULL).
@@ -93,19 +103,21 @@ def decode_schema_group(bronze: DataFrame, schema_id: int, schema_json: str) -> 
     )
 
 
-def decode_table(
-    bronze: DataFrame, registry: SchemaRegistry
-) -> tuple[DataFrame | None, DataFrame | None]:
+def decode_table(bronze: DataFrame, schemas) -> tuple[DataFrame | None, DataFrame | None]:
     """Decode one table's bronze rows. Returns (changes, undecodable).
 
-    Each Avro writer schema is decoded separately (a column added at the source
-    creates a new schema id) and the results are unioned by name, so new columns
-    flow through as nulls for older events.
+    `schemas.lookup(run, schema_id)` returns the writer schema (normally a
+    SchemaArchive). Each (ingest run, schema id) is decoded separately (a column
+    added at the source creates a new schema id; IDs are only unique within one
+    registry's lifetime) and the results are unioned by name, so new columns flow
+    through as nulls for older events.
     """
-    schema_ids = [r[0] for r in bronze.select("_value_schema_id").distinct().collect()]
+    keyed = bronze.withColumn("_run", ingest_run(bronze))
+    groups = [(r[0], r[1]) for r in keyed.select("_run", "_value_schema_id").distinct().collect()]
     decoded, bad = [], []
-    for sid in schema_ids:
-        group = bronze.where(
+    for run, sid in groups:
+        in_run = keyed.where(F.col("_run") == run).drop("_run")
+        group = in_run.where(
             F.col("_value_schema_id").isNull() if sid is None else F.col("_value_schema_id") == sid
         )
         reason = None
@@ -113,13 +125,13 @@ def decode_table(
             reason = "not_confluent_avro"
         else:
             try:
-                schema_json = registry.schema_json(sid)
+                schema_json = schemas.lookup(run, sid)
             except Exception:  # noqa: BLE001 - registry 404s and network errors both quarantine
                 reason = f"unknown_schema_id:{sid}"
         if reason:
             bad.append(group.select(*LINEAGE, F.array(F.lit(reason)).alias("_dq_failures")))
             continue
-        rows = decode_schema_group(group, sid, schema_json)
+        rows = decode_schema_group(group, run, sid, schema_json)
         decoded.append(rows.where("_decoded_ok").drop("_decoded_ok"))
         bad.append(
             rows.where(~F.col("_decoded_ok")).select(

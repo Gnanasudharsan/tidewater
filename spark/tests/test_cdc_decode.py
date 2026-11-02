@@ -10,6 +10,7 @@ from pyspark.sql.avro.functions import to_avro
 
 from tidewater_spark.cdc import decode_table
 from tidewater_spark.registry import SchemaRegistry
+from tidewater_spark.schema_archive import RegistryOnly
 
 VALUE = {
     "type": "record",
@@ -68,7 +69,7 @@ def fake_registry():
         },
         "http://r/subjects/src/versions/1": {"schema": json.dumps(SOURCE)},
     }
-    return SchemaRegistry("http://r", fetch=lambda url: docs[url])
+    return RegistryOnly(SchemaRegistry("http://r", fetch=lambda url: docs[url]))
 
 
 def bronze_rows(spark, events, schema_id=7):

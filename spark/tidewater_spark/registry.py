@@ -78,6 +78,13 @@ class SchemaRegistry:
             defs[ref["name"]] = json.loads(doc["schema"])
         return defs
 
+    def latest_for_subject(self, subject: str) -> str:
+        """Self-contained schema of a subject's latest version."""
+        doc = self._fetch(f"{self.base_url}/subjects/{subject}/versions/latest")
+        schema = json.loads(doc["schema"])
+        defs = self._definitions(doc.get("references", []))
+        return json.dumps(inline_references(schema, defs) if defs else schema)
+
     def _schema_json(self, schema_id: int) -> str:
         """Self-contained Avro schema (JSON string) for a registry id."""
         doc = self._fetch(f"{self.base_url}/schemas/ids/{schema_id}")
