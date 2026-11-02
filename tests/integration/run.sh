@@ -32,8 +32,15 @@ done
 
 log "Loading the warehouse and building dbt"
 spark_job jobs/load_warehouse.py 2>&1 | grep -E "INFO [a-z_]+:" || true
-$COMPOSE --profile wh run --rm --build dbt build 2>&1 | grep -E "Done\.|FAIL|ERROR" | tail -5
-$COMPOSE --profile wh run --rm dbt build --quiet >/dev/null  # exits non-zero on any failure
+# Compose bind-mounts ./dbt over the image's project, so install packages into it first
+# (a fresh checkout has no dbt_packages/).
+$COMPOSE --profile wh run --rm --build dbt deps >/dev/null
+if ! $COMPOSE --profile wh run --rm dbt build >/tmp/dbt_build.out 2>&1; then
+  tail -40 /tmp/dbt_build.out
+  log "FAIL: dbt build"
+  exit 1
+fi
+grep -E "Done\." /tmp/dbt_build.out
 
 log "Asserting marts match the source"
 fail=0
