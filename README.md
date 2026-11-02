@@ -13,7 +13,7 @@ Postgres 16 (WAL) ──▶ Debezium 2.7 ──▶ Kafka 3.7 (KRaft) ──▶ S
    simulator                           (Avro, BACKWARD)
 ```
 
-> 🚧 **Work in progress.** Weeks 0–7 are done (CDC, bronze, silver, warehouse, dimensional model, metrics, dashboard, orchestration, CI/CD, IaC); the silver soak test is pending. See [Roadmap](#roadmap).
+> 🚧 **Work in progress.** Weeks 0–8 are done (CDC through marts, orchestration, CI/CD, IaC, observability, lineage, 6 chaos tests); the hour-long soak and Snowflake benchmarks are next. See [Roadmap](#roadmap).
 
 ## Results
 
@@ -24,7 +24,7 @@ _Benchmarks land in week 9. No numbers are claimed here until they are measured.
 | p95 source → silver latency | < 60 s | — |
 | Duplicate or missing offsets in bronze after crashes | 0 | **0** across 76,789 events, 3 mid-batch SIGKILLs + 1 post-commit crash ([chaos 01](tests/chaos/01_kill_bronze_mid_batch.sh)) |
 | Silver vs. source reconciliation (counts + per-row SHA-256) | 100% | **100%** on all 5 tables, 162k rows, including after a [total Kafka data loss](docs/incidents/2026-11-01-kafka-log-loss.md) |
-| Duplicate PKs in silver after chaos tests | 0 | — |
+| Duplicate PKs in silver after chaos tests | 0 | **0**: all 6 chaos tests end in 100% reconciliation ([results](#chaos-suite)) |
 | Source reconciliation | 100% | — |
 | Throughput | — | — |
 | Snowflake credits per 1M events | — | — |
@@ -79,6 +79,9 @@ Then open **Kafka UI at http://localhost:8080** and watch change events stream i
 | Warehouse Postgres | `localhost:5434` (`make psql-wh`) |
 | Metabase dashboard | http://localhost:3000 |
 | Airflow | http://localhost:8085 |
+| Grafana | http://localhost:3001 |
+| Prometheus | http://localhost:9090 |
+| Marquez (lineage) | http://localhost:3002 |
 | dbt docs (lineage) | https://gnanasudharsan.github.io/tidewater/ |
 
 ### Compose profiles (8 GB laptops)
@@ -88,6 +91,41 @@ Then open **Kafka UI at http://localhost:8080** and watch change events stream i
 | `make up-core` | postgres-src, kafka, connect, schema-registry, object-store, kafka-ui, spark-bronze | ~6 GB limits, ~3 GB actual |
 | `make up-wh` | postgres-wh, metabase | ~2 GB |
 | `make up-all` | everything | 16 GB machines |
+
+## Chaos suite
+
+Each test injects a failure under live load and passes only if bronze has every
+Kafka offset exactly once and silver reconciles 100% with the source (row counts +
+SHA-256 of every column). Runbook for each: [docs/runbooks](docs/runbooks/).
+
+| # | Failure injected | Result | Found along the way |
+|---|---|---|---|
+| [01](tests/chaos/01_kill_bronze_mid_batch.sh) | SIGKILL bronze mid-batch ×3, plus a crash right after the Delta commit | PASS | replay skipped by Delta `txnVersion` |
+| [02](tests/chaos/02_debezium_outage.sh) | Debezium down (ran 180 s; default 600 s) | PASS | slot retained 14 MB of WAL |
+| [03](tests/chaos/03_add_column_live.sh) | `ADD COLUMN ... DEFAULT` live | PASS | **metadata-only DDL emits no CDC for existing rows; procedure is ALTER + backfill** |
+| [04](tests/chaos/04_malformed_events.sh) | 4 malformed Kafka records + a DQ-violating row | PASS | each quarantined with its exact reason; streams never stopped |
+| [05](tests/chaos/05_rebuild_silver_from_bronze.sh) | drop all silver, rebuild from bronze (both ingest runs) | PASS | needed the **schema archive** ([ADR 0010](docs/adr/0010-schema-archive-in-bronze.md)) and a delete-repair backfill |
+| [06](tests/chaos/06_concurrent_backfill.sh) | full backfill of 341k rows concurrent with live CDC | PASS | **unpartitioned MERGE targets livelock**; fixed with retry budget + pacing |
+
+## Observability and lineage
+
+```bash
+make up-obs               # Prometheus :9090, Grafana http://localhost:3001 (anonymous read-only)
+make up-lineage           # Marquez UI http://localhost:3002 (set OPENLINEAGE_URL=http://marquez:5000)
+make audit-trace ID=1     # one order: mart -> warehouse -> silver -> Kafka offsets -> WAL LSN
+```
+
+- **Grafana** (provisioned as code): CDC produce rate, bronze consumer lag, input vs
+  processed rows/s, batch duration, source→silver p50/p95 latency against the 60 s
+  SLO, rows merged, DQ failures, merge-conflict retries, dbt run times, warehouse freshness.
+- **Alerts** (to Slack/Discord or the local sink): latency SLO breach, bronze falling
+  behind, stream stalled or down, rows quarantined. Each was fired and resolved in testing.
+- **Lineage:** one OpenLineage graph in Marquez from the Kafka topics to `fct_orders`
+  (25 datasets, 24 jobs), from the Spark listener, `dbt-ol`, and explicit events for
+  what Spark cannot see (MERGE in `foreachBatch`, Change Data Feed reads).
+- **Audit trace:** [notebooks/audit_trace.ipynb](notebooks/audit_trace.ipynb) follows
+  order 1 through every layer, including its pre-incident events (schema 9) and its
+  post-incident re-snapshot (schema 7).
 
 ## Guarantees and how they are proven
 
@@ -114,7 +152,8 @@ Then open **Kafka UI at http://localhost:8080** and watch change events stream i
   [SeaweedFS over MinIO](docs/adr/0006-seaweedfs-over-minio.md) ·
   [Late data by LSN](docs/adr/0007-late-data-by-lsn-not-watermark.md) ·
   [Warehouse load by Delta version](docs/adr/0008-warehouse-load-by-delta-version.md) ·
-  [Containers via socket proxy](docs/adr/0009-orchestrate-containers-via-socket-proxy.md)
+  [Containers via socket proxy](docs/adr/0009-orchestrate-containers-via-socket-proxy.md) ·
+  [Schema archive in bronze](docs/adr/0010-schema-archive-in-bronze.md)
 - [Runbooks](docs/runbooks/) · [Dev log](docs/devlog.md) · [Postmortem: Kafka log loss](docs/incidents/2026-11-01-kafka-log-loss.md)
 
 ## Repository layout
@@ -141,13 +180,16 @@ tests/        unit, Airflow DAG, chaos and end-to-end integration tests
 - [x] **Week 5:** incremental warehouse load (Delta CDF), dbt staging models, source freshness, 29 data tests
 - [x] **Week 6:** SCD2 customer dimension, incremental facts, dbt-expectations, MetricFlow metrics (GMV, AOV, refund rate, repeat-customer rate), docs site, Metabase dashboard as code
 - [x] **Week 7:** 4 Airflow DAGs (via a Docker socket proxy), dbt Slim CI, DAG tests, Compose integration test in CI, Terraform for S3
-- [ ] **Week 8:** Grafana, lineage, chaos suite, runbooks
+- [x] **Week 8:** Prometheus + Grafana + alerts, OpenLineage/Marquez, 6 chaos tests with runbooks, audit trace, schema archive
 - [ ] **Week 9:** Snowflake benchmarks and cost per million events
 - [ ] **Week 10:** packaging and launch
 
 ## Trade-offs and future work
 
-Single-node everything; no HA. Flink, Iceberg, and Kubernetes are deliberately out
+Single-node everything; no HA. **Silver tables are unpartitioned**, so concurrent
+MERGEs (stream + backfill) conflict on every commit; partitioning by key range would
+let writers touch disjoint files. The full stack needs more than an 8 GB Docker VM to
+run everything at once comfortably. Flink, Iceberg, and Kubernetes are deliberately out
 of scope until the core guarantees are proven ([non-goals](docs/design.md#5-non-goals)).
 
 ## License

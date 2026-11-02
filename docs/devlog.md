@@ -2,6 +2,35 @@
 
 Bugs hit, root causes, and fixes. Newest first.
 
+## 2026-11-02: Week 8, observability, chaos suite, schema archive
+- **Schema archive closed the incident's open risk.** The recovery output shows
+  why it mattered: ID 9 was `orders` before the incident and `order_items` after.
+  Chaos 05 then rebuilt silver from both bronze runs with 0 quarantined rows. (ADR 0010.)
+- **Chaos 03 found a real CDC gap.** `ADD COLUMN ... DEFAULT` is metadata-only in
+  Postgres 11+, so existing rows never emit WAL events: 12,924 customers kept NULL
+  in silver while the source showed `'standard'`. The procedure is now
+  "ALTER, then backfill the table", and the test asserts it.
+- **Concurrent writers on an unpartitioned table livelock.** Under chaos 06 the
+  stream crashed 4 times on `ConcurrentAppendException`: a silver MERGE takes about
+  10 s, the backfill commits every few seconds, and Delta must treat every MERGE as
+  reading every file. Fixes: the stream retries up to 50 times (backoff capped at
+  30 s), the backfill pauses between chunks, and all six Delta conflict exceptions
+  are retryable (a concurrent schema evolution raises `MetadataChangedException`,
+  which my "Concurrent*" check missed). Real fix, future work: partition silver
+  so writers touch disjoint files.
+- **Alerting on a dead process: its series vanishes.** "Time since last progress"
+  never fired when silver was stopped, because Prometheus stopped scraping it and
+  the series disappeared. The rule now also fires on `up == 0`.
+- **The loader would have silently skipped data after a rebuild.** Bookmarks are
+  Delta versions, which restart at 0 for a recreated table. Bookmarks now store the
+  Delta table id and force a full reload when it changes.
+- **"Quiet logs" is not "replay finished".** Replay batches ran for minutes without
+  logging, so chaos 05 started its repair backfill mid-replay and the two fought for
+  an hour. It now waits for Prometheus to show 0 rows read for 2 minutes.
+- **Laptop limits:** with every service up, the 8 GB Docker VM runs out of headroom
+  (object store at 1,012/1,024 MiB, silver at 1.94/2 GB). The object store now gets
+  1.5 GB and bronze gives back 0.5 GB. More Docker memory is the real fix.
+
 ## 2026-11-02: Week 7, orchestration, CI/CD, Terraform
 - **Compaction fixed the small-files problem streaming created:** bronze went
   from 2,110 files to 15 (`jobs/maintenance.py`, run nightly by Airflow).
