@@ -144,8 +144,14 @@ jobs:
         run: ./scripts/register_connector.sh
       - name: Run the integration test
         run: ./tests/integration/run.sh
-      - name: Logs on failure
+      - name: Diagnostics on failure
         if: failure()
         run: |
           docker compose --profile core --profile wh ps
-          for s in connect spark-bronze spark-silver; do echo "=== $s"; docker compose logs --tail 80 $s; done
+          echo "=== bronze _delta_log (via SeaweedFS filer)"
+          curl -s -H 'Accept: application/json' "localhost:8888/buckets/lakehouse/bronze/cdc_events/_delta_log/?limit=20" || true
+          echo; echo "=== lakehouse top level"
+          curl -s -H 'Accept: application/json' "localhost:8888/buckets/lakehouse/?limit=50" || true
+          for s in connect spark-bronze spark-silver object-store; do
+            echo "=== $s"; docker compose logs --tail 150 $s | grep -vE "NativeCodeLoader|MetricsConfig"
+          done
