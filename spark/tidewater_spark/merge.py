@@ -73,9 +73,23 @@ def classify_against_target(
     return to_merge, late
 
 
+# Every subclass of Delta's DeltaConcurrentModificationException: optimistic-concurrency
+# losers that are safe to retry because the MERGE is idempotent. MetadataChanged covers
+# a concurrent schema evolution (e.g. silver auto-merging a new source column).
+DELTA_CONFLICTS = (
+    "ConcurrentAppendException",
+    "ConcurrentDeleteReadException",
+    "ConcurrentDeleteDeleteException",
+    "ConcurrentTransactionException",
+    "MetadataChangedException",
+    "ProtocolChangedException",
+    "DeltaConcurrentModificationException",
+)
+
+
 def is_write_conflict(exc: BaseException) -> bool:
     text = f"{type(exc).__name__} {exc}"
-    return "Concurrent" in text and ("Exception" in text or "conflict" in text.lower())
+    return any(name in text for name in DELTA_CONFLICTS)
 
 
 def with_conflict_retries(
@@ -84,6 +98,7 @@ def with_conflict_retries(
     what: str,
     max_attempts: int = 10,
     base_delay: float = 0.5,
+    max_delay: float = 30.0,
     sleep: Callable[[float], None] = time.sleep,
 ) -> int:
     """Run `action`, retrying Delta optimistic-concurrency conflicts with jittered backoff.
@@ -97,14 +112,20 @@ def with_conflict_retries(
         except Exception as exc:  # noqa: BLE001 - re-raised unless it is a write conflict
             if not is_write_conflict(exc) or attempt == max_attempts:
                 raise
-            delay = base_delay * 2 ** (attempt - 1) * (0.5 + random.random())
+            delay = min(max_delay, base_delay * 2 ** (attempt - 1)) * (0.5 + random.random())
             log.warning("%s: write conflict (attempt %d), retrying in %.1fs", what, attempt, delay)
             sleep(delay)
     raise AssertionError("unreachable")
 
 
 def merge_into_silver(
-    spark: SparkSession, path: str, changes: DataFrame, pk: tuple[str, ...], *, what: str
+    spark: SparkSession,
+    path: str,
+    changes: DataFrame,
+    pk: tuple[str, ...],
+    *,
+    what: str,
+    max_attempts: int = 10,
 ) -> int:
     """Upsert deduped changes into a silver table with the LSN guard. Returns attempts used."""
     changes = changes.withColumn("_silver_updated_at", F.current_timestamp())
@@ -128,4 +149,4 @@ def merge_into_silver(
             .execute()
         )
 
-    return with_conflict_retries(run, what=what)
+    return with_conflict_retries(run, what=what, max_attempts=max_attempts)

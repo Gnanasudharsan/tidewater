@@ -29,3 +29,10 @@ def test_target_gets_primary_key_once():
     stmts = create_target_sql("orders", ("order_id",))
     assert stmts[0] == 'create table if not exists silver."orders" (like silver."_stg_orders")'
     assert "contype = 'p'" in stmts[2] and 'add primary key ("order_id")' in stmts[2]
+
+
+def test_bookmark_stores_the_delta_table_id():
+    from tidewater_spark.warehouse import ADD_TABLE_ID, save_state_sql
+
+    assert "delta_table_id" in save_state_sql() and save_state_sql().count("%s") == 4
+    assert "add column if not exists delta_table_id" in ADD_TABLE_ID

@@ -19,6 +19,10 @@ create table if not exists {STATE_TABLE} (
     loaded_at timestamptz not null default now()
 )"""
 
+# Bookmarks are Delta versions, which restart at 0 when a table is recreated (e.g.
+# silver rebuilt from bronze). The table's unique id detects that and forces a full load.
+ADD_TABLE_ID = f"alter table {STATE_TABLE} add column if not exists delta_table_id text"
+
 
 def q(identifier: str) -> str:
     """Quote a Postgres identifier."""
@@ -70,7 +74,9 @@ def upsert_sql(table: str, columns: list[str], pk: tuple[str, ...]) -> str:
 
 def save_state_sql() -> str:
     return (
-        f"insert into {STATE_TABLE} (table_name, delta_version, rows_loaded) values (%s, %s, %s) "
+        f"insert into {STATE_TABLE} (table_name, delta_version, rows_loaded, delta_table_id) "
+        f"values (%s, %s, %s, %s) "
         f"on conflict (table_name) do update set delta_version = excluded.delta_version, "
-        f"rows_loaded = excluded.rows_loaded, loaded_at = now()"
+        f"rows_loaded = excluded.rows_loaded, delta_table_id = excluded.delta_table_id, "
+        f"loaded_at = now()"
     )

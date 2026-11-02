@@ -23,11 +23,13 @@ from delta.tables import DeltaTable
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 
+from tidewater_spark import lineage
 from tidewater_spark.cdf import changed_rows, ensure_cdf
 from tidewater_spark.config import Settings
 from tidewater_spark.session import build_spark
 from tidewater_spark.tables import TableContract, load_contracts
 from tidewater_spark.warehouse import (
+    ADD_TABLE_ID,
     CREATE_STATE,
     SCHEMA,
     STATE_TABLE,
@@ -58,15 +60,22 @@ def load_table(spark: SparkSession, settings: Settings, contract: TableContract)
         log.info("%s: no silver table yet", name)
         return
     ensure_cdf(spark, path)
-    current = DeltaTable.forPath(spark, path).history(1).first()["version"]
+    table = DeltaTable.forPath(spark, path)
+    current = table.history(1).first()["version"]
+    table_id = table.detail().first()["id"]
 
     with wh_connect(settings) as conn:
         conn.execute(CREATE_STATE)
+        conn.execute(ADD_TABLE_ID)
         row = conn.execute(
-            f"select delta_version from {STATE_TABLE} where table_name = %s", (name,)
+            f"select delta_version, delta_table_id from {STATE_TABLE} where table_name = %s",
+            (name,),
         ).fetchone()
         conn.commit()
     since = row[0] if row else None
+    if row and row[1] is not None and row[1] != table_id:
+        log.warning("%s: silver table was recreated (id changed); full reload", name)
+        since = None
     if since == current:
         log.info("%s: up to date at version %s", name, current)
         return
@@ -107,9 +116,15 @@ def load_table(spark: SparkSession, settings: Settings, contract: TableContract)
                 log.info("%s: schema evolution: %s", name, stmt)
                 conn.execute(stmt)
             conn.execute(upsert_sql(name, list(stg_cols), pk))
-        conn.execute(save_state_sql(), (name, current, n))
+        conn.execute(save_state_sql(), (name, current, n, table_id))
     rows.unpersist()
     log.info("%s: loaded %d rows (%s)", name, n, mode)
+    lineage.emit(
+        settings,
+        f"load_warehouse.{name}",
+        [lineage.lake(settings, path)],
+        [lineage.warehouse(settings, name)],
+    )
 
 
 def load_audit_tables(spark: SparkSession, settings: Settings) -> None:

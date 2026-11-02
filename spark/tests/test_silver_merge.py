@@ -160,6 +160,21 @@ def test_conflicts_are_retried_then_succeed():
     assert with_conflict_retries(flaky, what="t", sleep=lambda s: None) == 3
 
 
+@pytest.mark.parametrize(
+    "message",
+    [
+        "io.delta.exceptions.ConcurrentAppendException: Files were added",
+        "io.delta.exceptions.MetadataChangedException: The metadata of the Delta table changed",
+        "io.delta.exceptions.ProtocolChangedException: protocol version changed",
+    ],
+)
+def test_every_delta_conflict_type_is_retryable(message):
+    from tidewater_spark.merge import is_write_conflict
+
+    assert is_write_conflict(RuntimeError(message))
+    assert not is_write_conflict(RuntimeError("AnalysisException: cannot resolve column"))
+
+
 def test_non_conflict_errors_are_not_retried():
     calls = []
 

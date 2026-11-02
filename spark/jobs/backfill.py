@@ -107,6 +107,7 @@ def backfill_table(
     where: str | None,
     detect_deletes: bool,
     chunk_size: int,
+    pause_s: float = 2.0,
 ) -> None:
     if len(contract.primary_key) != 1:
         raise ValueError("chunked backfill needs a single-column primary key")
@@ -154,10 +155,18 @@ def backfill_table(
     for start in range(lo, hi + 1, chunk_size):
         chunk = changes.where((F.col(pk) >= start) & (F.col(pk) < start + chunk_size))
         attempts = merge_into_silver(
-            spark, path, chunk, contract.primary_key, what=f"backfill.{contract.name}[{start}]"
+            spark,
+            path,
+            chunk,
+            contract.primary_key,
+            what=f"backfill.{contract.name}[{start}]",
+            max_attempts=30,
         )
         retries += attempts - 1
         merged += 1
+        # Leave a commit window for the live stream between chunks: both MERGE into
+        # the same unpartitioned table, so every commit conflicts with the other.
+        time.sleep(pause_s)
     changes.unpersist()
     log.info(
         "%s: backfill done, %d chunks merged, %d conflict retries", contract.name, merged, retries
