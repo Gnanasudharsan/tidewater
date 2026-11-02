@@ -9,7 +9,7 @@ DURATION ?= 0
 
 .DEFAULT_GOAL := help
 .PHONY: help init up-core up-wh up-all down nuke ps logs register sim sim-burst \
-        psql-src psql-wh topics test test-spark verify-bronze chaos-bronze backfill reconcile soak load-wh dbt dbt-build dbt-freshness metrics dashboard maintenance up-orch airflow-password test-airflow tf-plan tf-apply integration lint fmt pre-commit
+        psql-src psql-wh topics test test-spark verify-bronze chaos-bronze backfill reconcile soak load-wh dbt dbt-build dbt-freshness metrics dashboard maintenance up-orch airflow-password test-airflow tf-plan tf-apply integration up-obs chaos up-lineage audit-trace lint fmt pre-commit
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-12s\033[0m %s\n",$$1,$$2}'
@@ -28,6 +28,17 @@ up-core: .env ## Start source DB, Kafka, Debezium, registry, S3, Kafka UI, bronz
 
 up-wh: .env ## Start the Postgres warehouse and Metabase (~2 GB)
 	$(COMPOSE) --profile wh up -d --wait
+
+up-obs: .env ## Start Prometheus, Grafana (http://localhost:3001), Kafka exporter, alert sink
+	$(COMPOSE) --profile core --profile obs up -d prometheus kafka-exporter grafana alert-sink
+
+up-lineage: .env ## Start Marquez (API :5005, UI http://localhost:3002); set OPENLINEAGE_URL to emit
+	$(COMPOSE) --profile wh up -d --wait postgres-wh
+	$(COMPOSE) exec -T postgres-wh sh -c 'psql -q -U $$POSTGRES_USER -d $$POSTGRES_DB' < infra/postgres-wh/init/03_marquez.sql
+	$(COMPOSE) --profile wh --profile lineage up -d marquez marquez-web
+
+audit-trace: ## Trace one order from the mart back to Kafka offsets and WAL LSNs (ID=1234)
+	$(SPARK_RUN) $(SUBMIT) jobs/audit_trace.py --order-id $(ID)
 
 up-orch: .env ## Start Airflow (UI http://localhost:8085) and its Docker socket proxy
 	$(COMPOSE) --profile wh up -d --wait postgres-wh
@@ -131,6 +142,9 @@ maintenance: ## Compact small files and vacuum bronze/silver (ARGS="--skip-vacuu
 
 soak: ## Load test: simulator + mid-run concurrent backfill, then verify bronze and reconcile silver
 	./scripts/soak.sh $(or $(DURATION),600) $(or $(SOAK_RATE),50)
+
+chaos: ## Run one chaos test, e.g. make chaos N=03 (see tests/chaos/)
+	./tests/chaos/$(N)_*.sh $(ARGS)
 
 chaos-bronze: ## Chaos test 01: SIGKILL bronze mid-batch N times, then verify (KILLS=3 CHAOS_RATE=100)
 	./tests/chaos/01_kill_bronze_mid_batch.sh $(KILLS) $(CHAOS_RATE)
