@@ -131,10 +131,12 @@ class Simulator:
         order_id = self._random_id("orders", "order_id", "status in ('placed','paid','shipped')")
         if order_id is None:
             return
-        (status,) = self.conn.execute(
+        row = self.conn.execute(
             "select status from orders where order_id = %s for update", (order_id,)
         ).fetchone()
-        new = next_status(status)
+        if row is None:  # deleted by a concurrent simulator since we picked it
+            return
+        new = next_status(row[0])
         if new is None:
             return
         self.conn.execute("update orders set status = %s where order_id = %s", (new, order_id))
@@ -248,6 +250,10 @@ def main() -> None:
                 counts[kind.value] += 1
             except psycopg.errors.UniqueViolation:
                 counts["retry_unique"] += 1
+            except (psycopg.errors.IntegrityError, psycopg.errors.TransactionRollbackError):
+                # Concurrent simulators race like real clients: a row deleted between
+                # pick and write (FK violation) or a deadlock. Skip the event.
+                counts["retry_conflict"] += 1
             now = time.monotonic()
             if now - last_report >= 10:
                 total = sum(counts.values())

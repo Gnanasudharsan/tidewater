@@ -57,6 +57,10 @@ class ProgressMetrics(StreamingQueryListener):
 
     def __init__(self, stream: str):
         self.stream = stream
+        # Export every series from the start: a stream with nothing to do yet must
+        # read as 0, not as missing (dashboards and the benchmark both rely on it).
+        ROWS.labels(stream).inc(0)
+        LAST_PROGRESS.labels(stream).set(time.time())
 
     def onQueryStarted(self, event) -> None:  # noqa: N802 - Spark's API
         LAST_PROGRESS.labels(self.stream).set(time.time())
