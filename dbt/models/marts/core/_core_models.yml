@@ -111,3 +111,8 @@ models:
 
   - name: metricflow_time_spine
     description: Day spine required by MetricFlow.
+
+  - name: snowflake_cost
+    description: >
+      Snowflake only. Hourly credits used by TIDEWATER_WH next to rows loaded, giving
+      credits per million rows delivered.

@@ -4,4 +4,5 @@ chispa==0.10.1
 PyYAML==6.0.2
 prometheus-client==0.21.0
 openlineage-python==1.40.0
+snowflake-connector-python[pandas]==3.13.2
 psycopg[binary]==3.2.1

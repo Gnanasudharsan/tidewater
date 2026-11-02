@@ -9,7 +9,7 @@ DURATION ?= 0
 
 .DEFAULT_GOAL := help
 .PHONY: help init up-core up-wh up-all down nuke ps logs register sim sim-burst \
-        psql-src psql-wh topics test test-spark verify-bronze chaos-bronze backfill reconcile soak load-wh dbt dbt-build dbt-freshness metrics dashboard maintenance up-orch airflow-password test-airflow tf-plan tf-apply integration up-obs chaos up-lineage audit-trace lint fmt pre-commit
+        psql-src psql-wh topics test test-spark verify-bronze chaos-bronze backfill reconcile soak load-wh dbt dbt-build dbt-freshness metrics dashboard maintenance up-orch airflow-password test-airflow tf-plan tf-apply integration up-obs chaos up-lineage audit-trace bench sf-keypair sf-plan sf-apply load-sf dbt-sf lint fmt pre-commit
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-12s\033[0m %s\n",$$1,$$2}'
@@ -39,6 +39,31 @@ up-lineage: .env ## Start Marquez (API :5005, UI http://localhost:3002); set OPE
 
 audit-trace: ## Trace one order from the mart back to Kafka offsets and WAL LSNs (ID=1234)
 	$(SPARK_RUN) $(SUBMIT) jobs/audit_trace.py --order-id $(ID)
+
+bench: ## Throughput/latency sweep (RATES="100 500 1000 2000" STEP=180), results in bench/results/
+	./scripts/bench.sh $(or $(LABEL),baseline)
+
+# ---- Snowflake (week 9). Credentials: SNOWFLAKE_* in .env, private key in .secrets/ ----
+SF_TF := docker run --rm -v $(PWD)/terraform/snowflake:/tf -w /tf --env-file .env \
+	-e TF_VAR_service_user_rsa_public_key hashicorp/terraform:1.9.8
+
+sf-keypair: ## Generate the service user's RSA key pair into .secrets/
+	./scripts/snowflake_keypair.sh
+
+sf-plan: ## Terraform plan for Snowflake objects (warehouse, DB, roles, service user, monitor)
+	export TF_VAR_service_user_rsa_public_key="$$(grep -v -- '-----' .secrets/snowflake_key.pub | tr -d '\n')"; \
+	$(SF_TF) init -input=false -no-color >/dev/null && $(SF_TF) plan -input=false -no-color
+
+sf-apply: ## Terraform apply for Snowflake objects
+	export TF_VAR_service_user_rsa_public_key="$$(grep -v -- '-----' .secrets/snowflake_key.pub | tr -d '\n')"; \
+	$(SF_TF) init -input=false -no-color >/dev/null && $(SF_TF) apply -input=false -auto-approve -no-color
+
+load-sf: ## Incrementally load silver into Snowflake (TIDEWATER.SILVER)
+	$(SPARK_RUN) $(SUBMIT) jobs/load_snowflake.py $(ARGS)
+
+dbt-sf: ## Build and test every dbt model on Snowflake (same project, --target snowflake)
+	$(COMPOSE) --profile wh run --rm -e DBT_TARGET=snowflake dbt deps
+	$(COMPOSE) --profile wh run --rm -e DBT_TARGET=snowflake dbt build
 
 up-orch: .env ## Start Airflow (UI http://localhost:8085) and its Docker socket proxy
 	$(COMPOSE) --profile wh up -d --wait postgres-wh

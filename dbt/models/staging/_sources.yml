@@ -20,3 +20,8 @@ sources:
       - name: orders
       - name: order_items
       - name: payments
+      - name: _load_log
+        description: Rows delivered per table per load (written by the Snowflake loader).
+        config:
+          enabled: "{{ target.type == 'snowflake' }}"
+        freshness: null

@@ -33,3 +33,6 @@ terraform/**/*.tfvars
 .DS_Store
 .idea/
 .vscode/
+
+# Local credentials (Snowflake private key, etc.)
+.secrets/

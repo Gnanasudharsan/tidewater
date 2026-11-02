@@ -11,4 +11,15 @@ tidewater:
       dbname: "{{ env_var('WH_PGDATABASE', 'analytics') }}"
       schema: public
       threads: 4
-    # snowflake: added in week 9 (benchmarks). Same models, `--target snowflake`.
+    # Week 9 benchmarks: the same models with `--target snowflake` (key-pair auth).
+    snowflake:
+      type: snowflake
+      account: "{{ env_var('SNOWFLAKE_ACCOUNT', 'unset') }}"
+      user: "{{ env_var('SNOWFLAKE_USER', 'SVC_TIDEWATER') }}"
+      private_key_path: "{{ env_var('SNOWFLAKE_PRIVATE_KEY_PATH', '/secrets/snowflake_key.p8') }}"
+      role: TIDEWATER_TRANSFORMER
+      warehouse: TIDEWATER_WH
+      database: TIDEWATER
+      schema: PUBLIC
+      threads: 8
+      query_tag: tidewater-dbt
