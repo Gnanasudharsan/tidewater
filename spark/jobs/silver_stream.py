@@ -124,10 +124,16 @@ def process_batch(
             union(late), settings.late_arrivals_path, f"{app}_late", batch_id
         )
 
-    merged_frames = []
+    # Source commit times of the rows about to merge, read BEFORE the merge: if the
+    # cache is evicted, recomputing to_merge afterwards compares against the updated
+    # target and comes back empty.
+    source_ts_micros = []
     for contract, to_merge in pending:
         n = to_merge.count()
         if n:
+            ts = to_merge.select(
+                F.percentile_approx(F.unix_micros("_source_ts"), [0.05, 0.5]).alias("p")
+            ).first()["p"]
             attempts = merge_into_silver(
                 spark,
                 settings.silver_path(contract.name),
@@ -136,18 +142,14 @@ def process_batch(
                 what=f"silver.{contract.name}",
             )
             stats[contract.name] = n if attempts == 1 else f"{n} ({attempts} attempts)"
-            merged_frames.append(to_merge.select("_source_ts"))
+            if ts:
+                source_ts_micros.append(ts)
 
-    # Source-commit -> silver-commit latency for rows merged in this batch.
-    if merged_frames:
-        committed_at = dt.datetime.now(dt.UTC).replace(tzinfo=None)
-        lag_s = (F.unix_micros(F.lit(committed_at)) - F.unix_micros("_source_ts")) / 1e6
-        p50, p95 = (
-            union(merged_frames)
-            .select(F.percentile_approx(lag_s, [0.5, 0.95]).alias("p"))
-            .first()["p"]
-        )
-        stats["latency_p50_s"], stats["latency_p95_s"] = round(p50, 1), round(p95, 1)
+    # Source-commit -> silver-commit latency: the oldest 5% of source commits give p95.
+    if source_ts_micros:
+        committed = dt.datetime.now(dt.timezone.utc).timestamp() * 1e6
+        stats["latency_p95_s"] = round((committed - min(t[0] for t in source_ts_micros)) / 1e6, 1)
+        stats["latency_p50_s"] = round((committed - min(t[1] for t in source_ts_micros)) / 1e6, 1)
 
     for _, df in pending:
         df.unpersist()

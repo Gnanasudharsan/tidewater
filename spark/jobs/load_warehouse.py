@@ -21,6 +21,7 @@ import time
 import psycopg
 from delta.tables import DeltaTable
 from pyspark.sql import SparkSession
+from pyspark.sql import functions as F
 
 from tidewater_spark.cdf import changed_rows, ensure_cdf
 from tidewater_spark.config import Settings
@@ -111,6 +112,26 @@ def load_table(spark: SparkSession, settings: Settings, contract: TableContract)
     log.info("%s: loaded %d rows (%s)", name, n, mode)
 
 
+def load_audit_tables(spark: SparkSession, settings: Settings) -> None:
+    """Mirror the (small, append-only) quarantine and late-arrival logs for dashboards."""
+    for path, table in [
+        (settings.quarantine_path, "dq_quarantine"),
+        (settings.late_arrivals_path, "late_arrivals"),
+    ]:
+        if not DeltaTable.isDeltaTable(spark, path):
+            continue
+        df = spark.read.format("delta").load(path).drop("value")
+        if "reasons" in df.columns:
+            df = df.withColumn("reasons", F.concat_ws(",", "reasons"))
+        df.write.jdbc(
+            settings.wh_jdbc_url,
+            f"{SCHEMA}.{table}",
+            mode="overwrite",
+            properties=settings.wh_jdbc_props,
+        )
+        log.info("%s: mirrored %d rows", table, df.count())
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--table", action="append")
@@ -125,6 +146,7 @@ def main() -> None:
         started = time.monotonic()
         for name in args.table or sorted(contracts):
             load_table(spark, settings, contracts[name])
+        load_audit_tables(spark, settings)
         if not args.interval:
             break
         time.sleep(max(0.0, args.interval - (time.monotonic() - started)))
