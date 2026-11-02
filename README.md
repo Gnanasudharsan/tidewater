@@ -13,7 +13,7 @@ Postgres 16 (WAL) ──▶ Debezium 2.7 ──▶ Kafka 3.7 (KRaft) ──▶ S
    simulator                           (Avro, BACKWARD)
 ```
 
-> 🚧 **Work in progress.** Weeks 0–5 (foundation, CDC, bronze, silver, warehouse + dbt staging) are done; the silver soak test is pending. See [Roadmap](#roadmap).
+> 🚧 **Work in progress.** Weeks 0–6 are done (CDC, bronze, silver, warehouse, dimensional model, metrics, dashboard); the silver soak test is pending. See [Roadmap](#roadmap).
 
 ## Results
 
@@ -23,7 +23,7 @@ _Benchmarks land in week 9. No numbers are claimed here until they are measured.
 |---|---|---|
 | p95 source → silver latency | < 60 s | — |
 | Duplicate or missing offsets in bronze after crashes | 0 | **0** across 76,789 events, 3 mid-batch SIGKILLs + 1 post-commit crash ([chaos 01](tests/chaos/01_kill_bronze_mid_batch.sh)) |
-| Silver vs. source reconciliation (counts + per-row SHA-256) | 100% | **100%** on all 5 tables, 49,494 rows, after a 77k-event backlog |
+| Silver vs. source reconciliation (counts + per-row SHA-256) | 100% | **100%** on all 5 tables, 162k rows, including after a [total Kafka data loss](docs/incidents/2026-11-01-kafka-log-loss.md) |
 | Duplicate PKs in silver after chaos tests | 0 | — |
 | Source reconciliation | 100% | — |
 | Throughput | — | — |
@@ -44,11 +44,13 @@ make backfill ARGS="--table orders"   # backfill from the source while the strea
 make chaos-bronze         # SIGKILL the stream mid-batch under load, then verify
 make soak DURATION=3600   # an hour of load + a concurrent backfill, then reconcile
 
-docker compose up -d postgres-wh   # warehouse (Metabase comes in week 6)
-make load-wh              # silver -> Postgres warehouse, incremental by Delta version
-make dbt-build            # dbt staging models + 29 data tests
-make dbt-freshness        # is the warehouse keeping up?
+make up-wh                # warehouse, continuous loader, Metabase
+make dbt-build            # snapshot + staging + dims + incremental facts + 65 data tests
+make metrics              # query GMV, orders, AOV, refund rate via MetricFlow
+make dashboard            # provision the Metabase dashboard as code
 ```
+
+Then open **http://localhost:3000** for the live dashboard (admin login is in your `.env`).
 
 Then open **Kafka UI at http://localhost:8080** and watch change events stream into
 `tidewater.public.*`. `make help` lists every command.
@@ -62,6 +64,8 @@ Then open **Kafka UI at http://localhost:8080** and watch change events stream i
 | S3 endpoint / filer UI | http://localhost:8333 / http://localhost:8888 |
 | Source Postgres | `localhost:5432` (`make psql-src`) |
 | Warehouse Postgres | `localhost:5434` (`make psql-wh`) |
+| Metabase dashboard | http://localhost:3000 |
+| dbt docs (lineage) | GitHub Pages, published by [docs.yml](.github/workflows/docs.yml) |
 
 ### Compose profiles (8 GB laptops)
 
@@ -96,7 +100,7 @@ Then open **Kafka UI at http://localhost:8080** and watch change events stream i
   [SeaweedFS over MinIO](docs/adr/0006-seaweedfs-over-minio.md) ·
   [Late data by LSN](docs/adr/0007-late-data-by-lsn-not-watermark.md) ·
   [Warehouse load by Delta version](docs/adr/0008-warehouse-load-by-delta-version.md)
-- [Runbooks](docs/runbooks/) · [Dev log](docs/devlog.md)
+- [Runbooks](docs/runbooks/) · [Dev log](docs/devlog.md) · [Postmortem: Kafka log loss](docs/incidents/2026-11-01-kafka-log-loss.md)
 
 ## Repository layout
 
@@ -104,10 +108,10 @@ Then open **Kafka UI at http://localhost:8080** and watch change events stream i
 connect/      Debezium connector config
 docs/         design doc, ADRs, runbooks, dev log
 infra/        Postgres init SQL (source + warehouse)
-scripts/      connector registration, soak test
+scripts/      connector registration, soak test, Metabase provisioning
 simulator/    Python + Faker transaction generator
 spark/        Spark image; bronze + silver streams, backfill, reconcile; DQ contracts in conf/
-dbt/          sources + freshness, staging models, tests (dims/facts in week 6)
+dbt/          staging, SCD2 snapshot, dims, incremental facts, semantic layer, tests
 airflow/      DAGs                                    (week 7)
 terraform/    S3 buckets, Snowflake objects           (week 7+)
 tests/        unit and chaos tests (integration in week 7)
@@ -120,7 +124,7 @@ tests/        unit and chaos tests (integration in week 7)
 - [x] **Week 2:** bronze (Kafka → Delta, append-only, idempotent writes, offset-gap checker, chaos test 01)
 - [~] **Weeks 3–4:** silver built and reconciled 100% on a 77k-event backlog; the hour-long soak with a concurrent backfill is still to run
 - [x] **Week 5:** incremental warehouse load (Delta CDF), dbt staging models, source freshness, 29 data tests
-- [ ] **Week 6:** dimensional model, SCD2, MetricFlow, Metabase
+- [x] **Week 6:** SCD2 customer dimension, incremental facts, dbt-expectations, MetricFlow metrics (GMV, AOV, refund rate, repeat-customer rate), docs site, Metabase dashboard as code
 - [ ] **Week 7:** Airflow, CI integration test, Terraform
 - [ ] **Week 8:** Grafana, lineage, chaos suite, runbooks
 - [ ] **Week 9:** Snowflake benchmarks and cost per million events

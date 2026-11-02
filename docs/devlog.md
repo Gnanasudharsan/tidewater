@@ -2,6 +2,33 @@
 
 Bugs hit, root causes, and fixes. Newest first.
 
+## 2026-11-01: Week 6, dimensional model, metrics, dashboard
+- **Incident: Kafka lost every topic when its container was recreated.** The
+  volume was never used (`KAFKA_LOG_DIRS` unset). The pipeline stopped itself, was
+  recovered to 100% reconciliation, and got a postmortem:
+  [incidents/2026-11-01-kafka-log-loss.md](incidents/2026-11-01-kafka-log-loss.md).
+- **Object store OOM-killed at 512 MB with no restart policy**, which froze every
+  Spark job at once (0% CPU everywhere was the clue). Now 1 GB, leveldb volume
+  index, and every long-running service restarts on failure.
+- **Ruff "fixed" code into a crash.** Lint targeted Python 3.11, so UP017 rewrote
+  `datetime.timezone.utc` as `datetime.UTC`, which doesn't exist in the Spark
+  image's Python 3.10. The lint target now matches the runtime.
+- **A latency metric read from an evicted cache.** `persist()` is a hint: after
+  the MERGE, Spark recomputed `to_merge`, whose filter ("newer than silver?") now
+  matched nothing, and the metric code crashed unpacking `None`. Metrics are now
+  computed before the merge.
+- **An SCD2 test was wrong, not the model.** "Exactly one current version per
+  customer" failed for 55 customers deleted at the source: the snapshot closes them
+  out, as it should. The test now says "at most one, and exactly one if live".
+- **`dbt build` skips downstream models when a test fails**, so the next
+  incremental run had a stale high-water mark and reprocessed more than expected.
+  Correct, just surprising.
+- Delta's expired-log cleanup throws `MatchError` on SeaweedFS (`_delta_log/_commits`
+  is reported as a file). It is caught and logged as a WARN; checkpoints still work.
+- Known limitation: dbt snapshots record a customer's state at snapshot time, so
+  two address changes between runs collapse into one version. A CDC-native SCD2
+  built from silver's change feed would keep every version (future work).
+
 ## 2026-11-01: Week 5, warehouse load and dbt staging
 - **Avoided a classic incremental-load bug by design.** A watermark on
   `_silver_updated_at` can skip rows when two writers (stream and backfill)
