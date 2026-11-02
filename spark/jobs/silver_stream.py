@@ -16,6 +16,7 @@ from __future__ import annotations
 import datetime as dt
 import logging
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 from delta.tables import DeltaTable
 from pyspark.sql import DataFrame, SparkSession
@@ -130,27 +131,41 @@ def process_batch(
     # cache is evicted, recomputing to_merge afterwards compares against the updated
     # target and comes back empty.
     source_ts_micros = []
-    for contract, to_merge in pending:
+    prepared_at = time.monotonic()
+
+    def merge_table(contract: TableContract, to_merge: DataFrame) -> tuple | None:
         n = to_merge.count()
-        if n:
-            ts = to_merge.select(
-                F.percentile_approx(F.unix_micros("_source_ts"), [0.05, 0.5]).alias("p")
-            ).first()["p"]
-            attempts = merge_into_silver(
-                spark,
-                settings.silver_path(contract.name),
-                to_merge,
-                contract.primary_key,
-                what=f"silver.{contract.name}",
-                # A concurrent backfill commits every few seconds; the stream must
-                # outlast it rather than crash (30 s max backoff, ~20+ minutes total).
-                max_attempts=50,
-            )
-            stats[contract.name] = n if attempts == 1 else f"{n} ({attempts} attempts)"
-            metrics.MERGED.labels(contract.name).inc(n)
-            metrics.CONFLICT_RETRIES.inc(attempts - 1)
-            if ts:
-                source_ts_micros.append(ts)
+        if not n:
+            return None
+        # Source commit times are read BEFORE the merge: if the cache is evicted,
+        # recomputing to_merge afterwards compares against the updated target.
+        ts = to_merge.select(
+            F.percentile_approx(F.unix_micros("_source_ts"), [0.05, 0.5]).alias("p")
+        ).first()["p"]
+        attempts = merge_into_silver(
+            spark,
+            settings.silver_path(contract.name),
+            to_merge,
+            contract.primary_key,
+            what=f"silver.{contract.name}",
+            # A concurrent backfill commits every few seconds; the stream must
+            # outlast it rather than crash (30 s max backoff, ~20+ minutes total).
+            max_attempts=50,
+        )
+        return contract.name, n, attempts, ts
+
+    # Tables are independent Delta tables, so their MERGEs *can* run concurrently
+    # (SILVER_MERGE_PARALLELISM > 1). The A/B/A benchmark did not show a clear win on
+    # a shared 10-core laptop, so the default stays sequential (bench/README.md).
+    with ThreadPoolExecutor(max_workers=max(1, settings.silver_merge_parallelism)) as pool:
+        results = [r for r in pool.map(lambda p: merge_table(*p), pending) if r]
+    for name, n, attempts, ts in results:
+        stats[name] = n if attempts == 1 else f"{n} ({attempts} attempts)"
+        metrics.MERGED.labels(name).inc(n)
+        metrics.CONFLICT_RETRIES.inc(attempts - 1)
+        if ts:
+            source_ts_micros.append(ts)
+    merge_seconds = time.monotonic() - prepared_at
 
     # Source-commit -> silver-commit latency: the oldest 5% of source commits give p95.
     if source_ts_micros:
@@ -166,6 +181,8 @@ def process_batch(
         df.unpersist()
     bronze_batch.unpersist()
     stats["duration_s"] = round(time.monotonic() - started, 1)
+    stats["prepare_s"] = round(prepared_at - started, 1)  # decode, DQ, dedupe, classify, appends
+    stats["merge_s"] = round(merge_seconds, 1)
     log.info("silver batch %s", stats)
     return stats
 

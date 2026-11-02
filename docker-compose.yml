@@ -203,6 +203,10 @@ services:
       WH_PGUSER: ${WH_PG_USER}
       WH_PGPASSWORD: ${WH_PG_PASSWORD}
       OPENLINEAGE_URL: ${OPENLINEAGE_URL:-}
+      SILVER_MERGE_PARALLELISM: ${SILVER_MERGE_PARALLELISM:-1}
+      SNOWFLAKE_ACCOUNT: ${SNOWFLAKE_ACCOUNT:-}
+      SNOWFLAKE_USER: ${SNOWFLAKE_SERVICE_USER:-SVC_TIDEWATER}
+      SNOWFLAKE_PRIVATE_KEY_PATH: /secrets/snowflake_key.p8
     command:
       - /opt/spark/bin/spark-submit
       - --master
@@ -210,6 +214,8 @@ services:
       - --driver-memory
       - 900m
       - jobs/bronze_ingest.py
+    volumes:
+      - ./.secrets:/secrets:ro
     ports: ["4040:4040"]
     restart: unless-stopped
     mem_limit: 1536m
@@ -217,7 +223,7 @@ services:
 
   spark-silver:
     # Bronze -> silver: decode, DQ, dedupe, LSN-guarded MERGE into per-table Delta.
-    image: tidewater-spark:local
+    image: ${SILVER_IMAGE:-tidewater-spark:local}
     profiles: ["core", "all"]
     depends_on:
       spark-bronze: { condition: service_started }
@@ -226,7 +232,7 @@ services:
     command:
       - /opt/spark/bin/spark-submit
       - --master
-      - local[2]
+      - ${SILVER_MASTER:-local[2]}
       - --driver-memory
       - 1200m
       - --conf
@@ -450,8 +456,12 @@ services:
       WH_PGPASSWORD: ${WH_PG_PASSWORD}
       OPENLINEAGE_URL: ${OPENLINEAGE_URL:-}
       OPENLINEAGE_NAMESPACE: tidewater
+      SNOWFLAKE_ACCOUNT: ${SNOWFLAKE_ACCOUNT:-}
+      SNOWFLAKE_USER: ${SNOWFLAKE_SERVICE_USER:-SVC_TIDEWATER}
+      SNOWFLAKE_PRIVATE_KEY_PATH: /secrets/snowflake_key.p8
     volumes:
       - ./dbt:/dbt
+      - ./.secrets:/secrets:ro
     entrypoint: ["dbt"]
     command: ["--version"]
     mem_limit: 512m

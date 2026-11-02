@@ -44,6 +44,9 @@ class Settings:
     wh_user: str = ""
     wh_password: str = ""
     openlineage_url: str = ""
+    # Per-table MERGEs in parallel. Default 1 (sequential): the week-9 A/B/A benchmark
+    # was inconclusive on a shared laptop (bench/README.md).
+    silver_merge_parallelism: int = 1
 
     @property
     def lakehouse(self) -> str:
@@ -129,4 +132,5 @@ class Settings:
             wh_user=_env("WH_PGUSER", ""),
             wh_password=_env("WH_PGPASSWORD", ""),
             openlineage_url=_env("OPENLINEAGE_URL", ""),
+            silver_merge_parallelism=int(_env("SILVER_MERGE_PARALLELISM", "1")),
         )
