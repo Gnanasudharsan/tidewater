@@ -1,0 +1,129 @@
+version: 2
+
+# MetricFlow semantic layer: metrics are defined once here and queried the same way
+# from the CLI (`mf query`), dashboards, or any tool on the dbt Semantic Layer.
+
+semantic_models:
+  - name: orders
+    description: One row per order.
+    model: ref('fct_orders')
+    defaults:
+      agg_time_dimension: ordered_at
+    entities:
+      - name: order
+        type: primary
+        expr: order_id
+      - name: customer
+        type: foreign
+        expr: customer_id
+    dimensions:
+      - name: ordered_at
+        type: time
+        type_params:
+          time_granularity: day
+      - name: order_status
+        type: categorical
+      - name: is_repeat_order
+        type: categorical
+    measures:
+      - name: gross_order_value
+        description: Order totals of orders that count toward GMV (not cancelled).
+        agg: sum
+        expr: "case when counts_toward_gmv then order_total else 0 end"
+      - name: gmv_orders
+        description: Orders that count toward GMV.
+        agg: sum
+        expr: "case when counts_toward_gmv then 1 else 0 end"
+      - name: order_count
+        agg: count
+        expr: order_id
+      - name: refunded_order_count
+        agg: sum
+        expr: "case when is_refunded then 1 else 0 end"
+      - name: refunded_amount
+        agg: sum
+
+  - name: customers
+    description: One row per customer who has ordered.
+    model: ref('customer_order_summary')
+    defaults:
+      agg_time_dimension: first_ordered_at
+    entities:
+      - name: customer
+        type: primary
+        expr: customer_id
+    dimensions:
+      - name: first_ordered_at
+        type: time
+        type_params:
+          time_granularity: day
+    measures:
+      - name: ordering_customers
+        agg: count_distinct
+        expr: customer_id
+      - name: repeat_customers
+        agg: sum
+        expr: is_repeat_customer
+
+metrics:
+  - name: gmv
+    label: GMV
+    description: Gross merchandise value, the sum of order totals for non-cancelled orders.
+    type: simple
+    type_params:
+      measure: gross_order_value
+
+  - name: orders
+    label: Orders
+    type: simple
+    type_params:
+      measure: order_count
+
+  - name: aov
+    label: Average order value
+    description: GMV divided by the number of orders counted in GMV.
+    type: ratio
+    type_params:
+      numerator: gmv
+      denominator:
+        name: gmv_orders_metric
+
+  - name: gmv_orders_metric
+    label: GMV orders
+    type: simple
+    type_params:
+      measure: gmv_orders
+
+  - name: refund_rate
+    label: Refund rate
+    description: Share of orders that were refunded.
+    type: ratio
+    type_params:
+      numerator: refunded_orders
+      denominator: orders
+
+  - name: refunded_orders
+    label: Refunded orders
+    type: simple
+    type_params:
+      measure: refunded_order_count
+
+  - name: repeat_customer_rate
+    label: Repeat-customer rate
+    description: Share of ordering customers with two or more orders (by first-order date).
+    type: ratio
+    type_params:
+      numerator: repeat_customers_metric
+      denominator: ordering_customers_metric
+
+  - name: repeat_customers_metric
+    label: Repeat customers
+    type: simple
+    type_params:
+      measure: repeat_customers
+
+  - name: ordering_customers_metric
+    label: Ordering customers
+    type: simple
+    type_params:
+      measure: ordering_customers

@@ -10,6 +10,7 @@ select
     country,
     cast(created_at as {{ dbt.type_timestamp() }}) as created_at,
     cast(updated_at as {{ dbt.type_timestamp() }}) as updated_at,
-    _source_ts as cdc_source_ts
+    _source_ts as cdc_source_ts,
+    _wh_loaded_at
 from {{ source('silver', 'customers') }}
 where not is_deleted

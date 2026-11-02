@@ -10,8 +10,23 @@ snapshot-paths: ["snapshots"]
 target-path: target
 clean-targets: [target, dbt_packages]
 
+vars:
+  # Facts re-process rows loaded this long before their high-water mark. A loader
+  # transaction stamps _wh_loaded_at at its start but becomes visible at commit,
+  # so a short lookback absorbs rows that commit "late".
+  fact_lookback_minutes: 30
+  # Pre-history sentinel for the first SCD2 version of each customer.
+  scd_start: "1900-01-01"
+
+snapshots:
+  tidewater:
+    +target_schema: snapshots
+
 models:
   tidewater:
     staging:
       +schema: staging
       +materialized: view
+    marts:
+      +schema: marts
+      +materialized: table
