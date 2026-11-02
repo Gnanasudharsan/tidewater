@@ -13,7 +13,7 @@ Postgres 16 (WAL) ──▶ Debezium 2.7 ──▶ Kafka 3.7 (KRaft) ──▶ S
    simulator                           (Avro, BACKWARD)
 ```
 
-> 🚧 **Work in progress.** Weeks 0–6 are done (CDC, bronze, silver, warehouse, dimensional model, metrics, dashboard); the silver soak test is pending. See [Roadmap](#roadmap).
+> 🚧 **Work in progress.** Weeks 0–7 are done (CDC, bronze, silver, warehouse, dimensional model, metrics, dashboard, orchestration, CI/CD, IaC); the silver soak test is pending. See [Roadmap](#roadmap).
 
 ## Results
 
@@ -52,6 +52,19 @@ make dashboard            # provision the Metabase dashboard as code
 
 Then open **http://localhost:3000** for the live dashboard (admin login is in your `.env`).
 
+```bash
+make up-orch              # Airflow at http://localhost:8085 (user admin, `make airflow-password`)
+make integration          # 1,000 events end to end, asserted in the marts
+make tf-apply             # Terraform-managed S3 buckets
+```
+
+| Airflow DAG | Schedule | What it does |
+|---|---|---|
+| `dbt_build_hourly` | hourly | silver → warehouse load, source freshness, `dbt build` |
+| `backfill_range` | on demand | backfill one table for a validated date window, then reload and rebuild |
+| `lakehouse_maintenance_nightly` | 03:00 | Delta OPTIMIZE + VACUUM (bronze: 2,110 → 15 files) |
+| `dq_daily_report` | 06:00 | per-table DQ summary to `marts.dq_daily_report`; fails above a quarantine threshold |
+
 Then open **Kafka UI at http://localhost:8080** and watch change events stream into
 `tidewater.public.*`. `make help` lists every command.
 
@@ -65,6 +78,7 @@ Then open **Kafka UI at http://localhost:8080** and watch change events stream i
 | Source Postgres | `localhost:5432` (`make psql-src`) |
 | Warehouse Postgres | `localhost:5434` (`make psql-wh`) |
 | Metabase dashboard | http://localhost:3000 |
+| Airflow | http://localhost:8085 |
 | dbt docs (lineage) | https://gnanasudharsan.github.io/tidewater/ |
 
 ### Compose profiles (8 GB laptops)
@@ -99,7 +113,8 @@ Then open **Kafka UI at http://localhost:8080** and watch change events stream i
   [Postgres dev / Snowflake bench](docs/adr/0005-postgres-dev-snowflake-bench.md) ·
   [SeaweedFS over MinIO](docs/adr/0006-seaweedfs-over-minio.md) ·
   [Late data by LSN](docs/adr/0007-late-data-by-lsn-not-watermark.md) ·
-  [Warehouse load by Delta version](docs/adr/0008-warehouse-load-by-delta-version.md)
+  [Warehouse load by Delta version](docs/adr/0008-warehouse-load-by-delta-version.md) ·
+  [Containers via socket proxy](docs/adr/0009-orchestrate-containers-via-socket-proxy.md)
 - [Runbooks](docs/runbooks/) · [Dev log](docs/devlog.md) · [Postmortem: Kafka log loss](docs/incidents/2026-11-01-kafka-log-loss.md)
 
 ## Repository layout
@@ -112,9 +127,9 @@ scripts/      connector registration, soak test, Metabase provisioning
 simulator/    Python + Faker transaction generator
 spark/        Spark image; bronze + silver streams, backfill, reconcile; DQ contracts in conf/
 dbt/          staging, SCD2 snapshot, dims, incremental facts, semantic layer, tests
-airflow/      DAGs                                    (week 7)
-terraform/    S3 buckets, Snowflake objects           (week 7+)
-tests/        unit and chaos tests (integration in week 7)
+airflow/      DAGs: hourly build, backfill, maintenance, DQ report
+terraform/    S3 buckets (Snowflake objects in week 9)
+tests/        unit, Airflow DAG, chaos and end-to-end integration tests
 ```
 
 ## Roadmap
@@ -125,7 +140,7 @@ tests/        unit and chaos tests (integration in week 7)
 - [~] **Weeks 3–4:** silver built and reconciled 100% on a 77k-event backlog; the hour-long soak with a concurrent backfill is still to run
 - [x] **Week 5:** incremental warehouse load (Delta CDF), dbt staging models, source freshness, 29 data tests
 - [x] **Week 6:** SCD2 customer dimension, incremental facts, dbt-expectations, MetricFlow metrics (GMV, AOV, refund rate, repeat-customer rate), docs site, Metabase dashboard as code
-- [ ] **Week 7:** Airflow, CI integration test, Terraform
+- [x] **Week 7:** 4 Airflow DAGs (via a Docker socket proxy), dbt Slim CI, DAG tests, Compose integration test in CI, Terraform for S3
 - [ ] **Week 8:** Grafana, lineage, chaos suite, runbooks
 - [ ] **Week 9:** Snowflake benchmarks and cost per million events
 - [ ] **Week 10:** packaging and launch

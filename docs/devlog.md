@@ -2,6 +2,24 @@
 
 Bugs hit, root causes, and fixes. Newest first.
 
+## 2026-11-02: Week 7, orchestration, CI/CD, Terraform
+- **Compaction fixed the small-files problem streaming created:** bronze went
+  from 2,110 files to 15 (`jobs/maintenance.py`, run nightly by Airflow).
+- **Backfill params go into SQL, so they are schema-validated.** The table is an
+  enum and the dates use `format: date`. Triggering with
+  `"2026-11-01' or 1=1 --"` is rejected by Airflow before any task runs.
+- **dbt Slim CI needs data, not a prod database.** CI seeds a throwaway Postgres
+  with a 70 KB fixture: 6 orders per status, 3 deleted orders, and all their
+  lines, payments and customers (`scripts/make_ci_fixture.sh`). On PRs it builds
+  `+state:modified+` against main's manifest artifact.
+- **Ruff sorted `import airflow` as first-party**, because the repo has an
+  `airflow/` folder. Fixed with `known-third-party`.
+- **Shell default-value gotcha:** `${2:-{\}}` expands to `{\}`, not `{}`, which
+  broke `airflow dags trigger --conf`. Fixed with an explicit fallback.
+- **Terraform against SeaweedFS works** with the stock AWS provider (path-style,
+  skip_* flags). The existing bucket is adopted with an `import` block, and a
+  re-plan shows no changes.
+
 ## 2026-11-01: Week 6, dimensional model, metrics, dashboard
 - **Incident: Kafka lost every topic when its container was recreated.** The
   volume was never used (`KAFKA_LOG_DIRS` unset). The pipeline stopped itself, was
