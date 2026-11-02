@@ -65,7 +65,7 @@ Then open **Kafka UI at http://localhost:8080** and watch change events stream i
 | Source Postgres | `localhost:5432` (`make psql-src`) |
 | Warehouse Postgres | `localhost:5434` (`make psql-wh`) |
 | Metabase dashboard | http://localhost:3000 |
-| dbt docs (lineage) | GitHub Pages, published by [docs.yml](.github/workflows/docs.yml) |
+| dbt docs (lineage) | https://gnanasudharsan.github.io/tidewater/ |
 
 ### Compose profiles (8 GB laptops)
 
