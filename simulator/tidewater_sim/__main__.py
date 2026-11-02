@@ -214,6 +214,7 @@ def main() -> None:
         help="business events (transactions) per second",
     )
     parser.add_argument("--duration", type=float, default=0, help="seconds to run; 0 = forever")
+    parser.add_argument("--events", type=int, default=0, help="stop after N events; 0 = no limit")
     parser.add_argument(
         "--seed-customers", type=int, default=int(os.getenv("SIM_SEED_CUSTOMERS", "200"))
     )
@@ -238,6 +239,8 @@ def main() -> None:
         started = last_report = time.monotonic()
         log.info("generating %.1f events/sec (duration=%ss)", args.rate, args.duration or "inf")
         while not args.duration or time.monotonic() - started < args.duration:
+            if args.events and sum(counts.values()) >= args.events:
+                break
             pacer.wait()
             kind = pick_event(rng)
             try:
@@ -255,6 +258,7 @@ def main() -> None:
                     dict(counts.most_common()),
                 )
                 last_report = now
+        log.info("done: %d events | %s", sum(counts.values()), dict(counts.most_common()))
 
 
 if __name__ == "__main__":

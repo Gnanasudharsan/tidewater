@@ -9,7 +9,7 @@ DURATION ?= 0
 
 .DEFAULT_GOAL := help
 .PHONY: help init up-core up-wh up-all down nuke ps logs register sim sim-burst \
-        psql-src psql-wh topics test test-spark verify-bronze chaos-bronze backfill reconcile soak load-wh dbt dbt-build dbt-freshness metrics dashboard lint fmt pre-commit
+        psql-src psql-wh topics test test-spark verify-bronze chaos-bronze backfill reconcile soak load-wh dbt dbt-build dbt-freshness metrics dashboard maintenance up-orch airflow-password test-airflow tf-plan tf-apply integration lint fmt pre-commit
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-12s\033[0m %s\n",$$1,$$2}'
@@ -28,6 +28,32 @@ up-core: .env ## Start source DB, Kafka, Debezium, registry, S3, Kafka UI, bronz
 
 up-wh: .env ## Start the Postgres warehouse and Metabase (~2 GB)
 	$(COMPOSE) --profile wh up -d --wait
+
+up-orch: .env ## Start Airflow (UI http://localhost:8085) and its Docker socket proxy
+	$(COMPOSE) --profile wh up -d --wait postgres-wh
+	$(COMPOSE) exec -T postgres-wh sh -c 'psql -q -U $$POSTGRES_USER -d $$POSTGRES_DB' < infra/postgres-wh/init/02_airflow.sql
+	$(COMPOSE) build spark-bronze && $(COMPOSE) --profile wh build dbt
+	$(COMPOSE) --profile wh --profile orch up -d airflow
+
+airflow-password: ## Print the generated Airflow admin password (user: admin)
+	@$(COMPOSE) --profile wh --profile orch exec airflow cat /opt/airflow/standalone_admin_password.txt; echo
+
+test-airflow: ## DAG integrity tests inside the Airflow image
+	$(COMPOSE) --profile wh --profile orch run --rm --no-deps -v $(PWD)/tests/airflow:/opt/airflow/tests airflow \
+	  bash -c "pip install -q pytest==8.3.2 && python -m pytest -q -p no:cacheprovider /opt/airflow/tests"
+
+TF := docker run --rm --network $${COMPOSE_PROJECT_NAME:-tidewater}_default -v $(PWD)/terraform/local:/tf -w /tf \
+	-e TF_VAR_s3_access_key -e TF_VAR_s3_secret_key hashicorp/terraform:1.9.8
+TF_ENV := set -a; . ./.env; set +a; export TF_VAR_s3_access_key=$$S3_ACCESS_KEY TF_VAR_s3_secret_key=$$S3_SECRET_KEY;
+
+tf-plan: ## Terraform plan for local S3 buckets (runs in a container on the Compose network)
+	$(TF_ENV) $(TF) init -input=false -no-color >/dev/null && $(TF_ENV) $(TF) plan -input=false -no-color
+
+tf-apply: ## Terraform apply for local S3 buckets
+	$(TF_ENV) $(TF) init -input=false -no-color >/dev/null && $(TF_ENV) $(TF) apply -input=false -auto-approve -no-color
+
+integration: ## End-to-end test: 1,000 events through the pipeline into dbt marts
+	./tests/integration/run.sh
 
 up-all: .env ## Start everything (16 GB machines only)
 	$(COMPOSE) --profile all up -d --wait
@@ -99,6 +125,9 @@ dbt-freshness: ## Check silver source freshness thresholds
 dashboard: ## Provision the Metabase dashboard as code (idempotent)
 	$(COMPOSE) exec -T postgres-wh sh -c 'psql -q -U $$POSTGRES_USER -d $$POSTGRES_DB' < infra/postgres-wh/init/01_schemas.sql
 	python3 scripts/metabase_setup.py
+
+maintenance: ## Compact small files and vacuum bronze/silver (ARGS="--skip-vacuum")
+	$(SPARK_RUN) $(SUBMIT) jobs/maintenance.py $(ARGS)
 
 soak: ## Load test: simulator + mid-run concurrent backfill, then verify bronze and reconcile silver
 	./scripts/soak.sh $(or $(DURATION),600) $(or $(SOAK_RATE),50)
