@@ -21,12 +21,12 @@ _Benchmarks land in week 9. No numbers are claimed here until they are measured.
 
 | Metric | Target (SLO) | Measured |
 |---|---|---|
-| p95 source → silver latency | < 60 s | — |
+| p95 source → silver latency | < 60 s | **59.7 s** at 100 ev/s with small tables; **92–122 s** once tables reach ~250k rows ([bench](bench/README.md)): **SLO not met at scale yet** |
 | Duplicate or missing offsets in bronze after crashes | 0 | **0** across 76,789 events, 3 mid-batch SIGKILLs + 1 post-commit crash ([chaos 01](tests/chaos/01_kill_bronze_mid_batch.sh)) |
 | Silver vs. source reconciliation (counts + per-row SHA-256) | 100% | **100%** on all 5 tables, 162k rows, including after a [total Kafka data loss](docs/incidents/2026-11-01-kafka-log-loss.md) |
 | Duplicate PKs in silver after chaos tests | 0 | **0**: all 6 chaos tests end in 100% reconciliation ([results](#chaos-suite)) |
 | Source reconciliation | 100% | — |
-| Throughput | — | — |
+| Throughput (sources) | — | **2,000 business events/s** (5,232 CDC records/s) with 0 Kafka lag ([bench](bench/README.md)) |
 | Snowflake credits per 1M events | — | — |
 
 ## Quickstart
@@ -181,11 +181,13 @@ tests/        unit, Airflow DAG, chaos and end-to-end integration tests
 - [x] **Week 6:** SCD2 customer dimension, incremental facts, dbt-expectations, MetricFlow metrics (GMV, AOV, refund rate, repeat-customer rate), docs site, Metabase dashboard as code
 - [x] **Week 7:** 4 Airflow DAGs (via a Docker socket proxy), dbt Slim CI, DAG tests, Compose integration test in CI, Terraform for S3
 - [x] **Week 8:** Prometheus + Grafana + alerts, OpenLineage/Marquez, 6 chaos tests with runbooks, audit trace, schema archive
-- [ ] **Week 9:** Snowflake benchmarks and cost per million events
+- [~] **Week 9:** local benchmark sweep + A/B/A tuning experiment done ([bench](bench/README.md)); Snowflake Terraform, loader, dbt target and cost mart ready ([setup](docs/snowflake.md)), trial not started
 - [ ] **Week 10:** packaging and launch
 
 ## Trade-offs and future work
 
+**Silver latency grows with table size** (MERGE rewrites large files in unpartitioned
+tables); deletion vectors and key-range partitioning are the next experiments.
 Single-node everything; no HA. **Silver tables are unpartitioned**, so concurrent
 MERGEs (stream + backfill) conflict on every commit; partitioning by key range would
 let writers touch disjoint files. The full stack needs more than an 8 GB Docker VM to

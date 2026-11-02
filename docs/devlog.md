@@ -2,6 +2,24 @@
 
 Bugs hit, root causes, and fixes. Newest first.
 
+## 2026-11-02: Week 9, benchmarks
+- **The first sweep's "achieved rate" was wrong.** Parallel simulators raced: one
+  deleted an order between another picking it and locking it (`fetchone()` was
+  `None`), and FK races or deadlocks killed others before they logged their totals.
+  The simulator now skips such events like a real client; 8 of them reach 1,999 ev/s.
+- **"Silver is quiet" is not "silver is drained"** (again). The harness now
+  compares rows silver has read against rows bronze ingested.
+- **A restarted stream exports no counter until its first data batch.** The harness
+  waited forever for a series that wasn't there. The listener now initialises its
+  series at startup, and the harness uses `or vector(0)`.
+- **The tuning experiment was inconclusive, and that is the result.** A/B/A runs of
+  sequential vs concurrent per-table MERGEs: the two identical baselines differed
+  2.5×, more than the effect. The change ships behind a flag, off by default. A
+  JVM thread dump (`kill -3`) proved a suspected hang was just an idle stream.
+- **Real finding:** silver latency tracks table size, not load. A 193-row batch takes
+  44 s because MERGE into unpartitioned tables rewrites large files. That is the next
+  tuning target (deletion vectors, partitioning).
+
 ## 2026-11-02: Week 8, observability, chaos suite, schema archive
 - **Schema archive closed the incident's open risk.** The recovery output shows
   why it mattered: ID 9 was `orders` before the incident and `order_items` after.

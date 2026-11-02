@@ -1,0 +1,3 @@
+label,target_events_per_s,achieved_events_per_s,cdc_records_per_s,bronze_rows_per_s,silver_rows_per_s,latency_p50_s,latency_p95_s,latency_p95_max_s,bronze_max_offsets_behind,bronze_batch_s,silver_batch_s,drain_s
+A1_sequential,500.0,496.5,1311.63,1248.11,919.48,262.97,287.32,1694.3,0.0,6.74,59.55,15
+A1_sequential,1000.0,661.2,1341.32,1556.56,706.8,179.33,223.73,233.1,3936.0,13.22,129.04,196

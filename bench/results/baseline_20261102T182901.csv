@@ -1,0 +1,5 @@
+label,target_events_per_s,achieved_events_per_s,cdc_records_per_s,bronze_rows_per_s,silver_rows_per_s,latency_p50_s,latency_p95_s,latency_p95_max_s,bronze_max_offsets_behind,bronze_batch_s,silver_batch_s,drain_s
+baseline,100.0,100.0,269.39,282.05,666.66,106.68,121.9,174.3,0.0,6.14,50.83,15
+baseline,500.0,500.0,1332.04,1344.9,277.16,70.08,92.23,103.9,0.0,5.0,46.56,57
+baseline,1000.0,988.9,2629.37,2624.65,136.37,70.2,80.07,91.4,0.0,5.43,51.59,82
+baseline,2000.0,1996.5,5232.25,5575.92,432.18,83.31,96.14,130.7,0.0,4.36,52.96,77
