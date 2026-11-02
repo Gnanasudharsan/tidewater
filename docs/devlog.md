@@ -16,6 +16,19 @@ Bugs hit, root causes, and fixes. Newest first.
   `airflow/` folder. Fixed with `known-third-party`.
 - **Shell default-value gotcha:** `${2:-{\}}` expands to `{\}`, not `{}`, which
   broke `airflow dags trigger --conf`. Fixed with an explicit fallback.
+- **Integration test passed locally, failed in CI: the bind-mount trap.** Compose
+  mounts `./dbt` over the image's baked-in project; a fresh checkout has no
+  `dbt_packages/`, so dbt couldn't find `dbt_utils`. It only worked locally
+  because my folder already had packages installed. Reproduced by deleting the
+  local `dbt_packages/`, then fixed by running `dbt deps` first.
+- **Open issue: intermittent silver stall in CI (1 of 3 runs).** Silver logged
+  "waiting for bronze table" for 8 minutes while bronze had already committed
+  1,960 rows. I tested the obvious theory, that `DeltaTable.isDeltaTable` caches
+  a negative result, with two containers (one polling, one creating the table,
+  including under a brand-new top-level prefix): it picks up the new table within
+  one poll, so that theory is wrong. Not reproduced locally. CI now captures the
+  bronze `_delta_log` listing, the lakehouse listing and full service logs on
+  failure, so the next occurrence will show whether the table really existed.
 - **Terraform against SeaweedFS works** with the stock AWS provider (path-style,
   skip_* flags). The existing bucket is adopted with an `import` block, and a
   re-plan shows no changes.
