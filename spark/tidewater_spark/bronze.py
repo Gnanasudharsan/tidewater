@@ -18,8 +18,12 @@ def confluent_schema_id(value: Column) -> Column:
     return F.when(is_wire_format, F.conv(F.hex(F.substring(value, 2, 4)), 16, 10).cast("int"))
 
 
-def to_bronze(kafka_df: DataFrame, batch_id: int) -> DataFrame:
-    """Map a micro-batch from the Kafka source to the bronze schema. Payloads stay as raw bytes."""
+def to_bronze(kafka_df: DataFrame, batch_id: int, ingest_run: str = "bronze_cdc_v1") -> DataFrame:
+    """Map a micro-batch from the Kafka source to the bronze schema. Payloads stay as raw bytes.
+
+    `ingest_run` identifies the checkpoint lineage. Kafka offsets are only unique within
+    one run: after a Kafka rebuild, offsets restart at 0 under a new run.
+    """
     return kafka_df.select(
         F.col("key"),
         F.col("value"),
@@ -30,6 +34,7 @@ def to_bronze(kafka_df: DataFrame, batch_id: int) -> DataFrame:
         confluent_schema_id(F.col("value")).alias("_value_schema_id"),
         F.current_timestamp().alias("_ingested_at"),
         F.lit(batch_id).cast("long").alias("_batch_id"),
+        F.lit(ingest_run).alias("_ingest_run"),
         # tidewater.public.orders -> orders
         F.element_at(F.split(F.col("topic"), r"\."), -1).alias("source_table"),
     ).withColumn("ingest_date", F.to_date("_ingested_at"))

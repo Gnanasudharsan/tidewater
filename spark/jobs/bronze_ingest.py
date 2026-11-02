@@ -36,9 +36,10 @@ def main() -> None:
     def write_batch(batch_df: DataFrame, batch_id: int) -> None:
         before = table_version(spark, settings.bronze_path)
         (
-            to_bronze(batch_df, batch_id)
+            to_bronze(batch_df, batch_id, settings.bronze_txn_app_id)
             .write.format("delta")
             .mode("append")
+            .option("mergeSchema", "true")
             .option("txnAppId", settings.bronze_txn_app_id)
             .option("txnVersion", batch_id)
             .partitionBy(*BRONZE_PARTITION_COLUMNS)

@@ -32,6 +32,7 @@ def test_lineage_columns_and_source_table(spark):
     assert row["_partition"] == 0
     assert row["_offset"] == 42
     assert row["_batch_id"] == 7
+    assert row["_ingest_run"] == "bronze_cdc_v1"
     assert row["source_table"] == "orders"
     assert row["_value_schema_id"] == 9
     assert bytes(row["value"]) == wire  # payload kept byte-for-byte

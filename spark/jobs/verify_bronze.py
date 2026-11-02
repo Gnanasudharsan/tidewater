@@ -18,10 +18,16 @@ from tidewater_spark.offsets import BronzeStats, KafkaRange, check_partitions
 from tidewater_spark.session import build_spark
 
 
-def bronze_stats(spark: SparkSession, path: str) -> dict:
+def current_run(spark: SparkSession, path: str, run: str):
+    """Rows from this ingestion run (rows written before runs were tagged count as v1)."""
+    df = spark.read.format("delta").load(path)
+    tag = F.col("_ingest_run") if "_ingest_run" in df.columns else F.lit(None)
+    return df.where(F.coalesce(tag, F.lit("bronze_cdc_v1")) == run)
+
+
+def bronze_stats(spark: SparkSession, path: str, run: str) -> dict:
     rows = (
-        spark.read.format("delta")
-        .load(path)
+        current_run(spark, path, run)
         .groupBy("_topic", "_partition")
         .agg(
             F.count("*").alias("rows"),
@@ -54,11 +60,10 @@ def kafka_ranges(spark: SparkSession, settings: Settings) -> dict:
     return {(r["topic"], r["partition"]): KafkaRange(r["earliest"], r["latest"]) for r in rows}
 
 
-def show_gaps(spark: SparkSession, path: str, limit: int = 20) -> None:
+def show_gaps(spark: SparkSession, path: str, run: str, limit: int = 20) -> None:
     w = Window.partitionBy("_topic", "_partition").orderBy("_offset")
     (
-        spark.read.format("delta")
-        .load(path)
+        current_run(spark, path, run)
         .select("_topic", "_partition", "_offset")
         .distinct()
         .withColumn("prev", F.lag("_offset").over(w))
@@ -84,12 +89,13 @@ def main() -> int:
 
     settings = Settings.from_env()
     spark = build_spark("tidewater-verify-bronze", settings)
-    bronze = bronze_stats(spark, settings.bronze_path)
+    bronze = bronze_stats(spark, settings.bronze_path, settings.bronze_txn_app_id)
     kafka = kafka_ranges(spark, settings)
     findings = check_partitions(bronze, kafka, args.require_caught_up)
 
     total_rows = sum(s.rows for s in bronze.values())
-    print(f"\nbronze: {total_rows} rows across {len(bronze)} topic-partitions")
+    run = settings.bronze_txn_app_id
+    print(f"\nbronze run {run}: {total_rows} rows across {len(bronze)} topic-partitions")
     print(f"{'topic':<32}{'part':>5}{'rows':>9}{'min':>9}{'max':>9}{'kafka_max':>11}")
     for tp in sorted(set(bronze) | set(kafka)):
         b, k = bronze.get(tp), kafka.get(tp)
@@ -103,7 +109,7 @@ def main() -> int:
         level = "FAIL" if f.fatal else "WARN"
         print(f"[{level}] {f.partition[0]}[{f.partition[1]}] {f.kind}: {f.detail}")
     if any(f.kind == "gap" for f in findings):
-        show_gaps(spark, settings.bronze_path)
+        show_gaps(spark, settings.bronze_path, settings.bronze_txn_app_id)
 
     failed = any(f.fatal for f in findings)
     print("\nRESULT:", "FAIL" if failed else "PASS (no duplicates, no gaps)")

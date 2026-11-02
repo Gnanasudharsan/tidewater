@@ -32,6 +32,7 @@ services:
       test: ["CMD-SHELL", "pg_isready -U ${SRC_PG_USER} -d ${SRC_PG_DB}"]
       interval: 5s
       retries: 20
+    restart: unless-stopped
     mem_limit: 512m
     logging: *default-logging
 
@@ -55,6 +56,9 @@ services:
       KAFKA_NUM_PARTITIONS: 3
       KAFKA_LOG_RETENTION_HOURS: 168
       KAFKA_HEAP_OPTS: -Xms512m -Xmx1g
+      # Without this the image writes to /tmp inside the container and the volume
+      # below is never used: recreating the container wipes every topic.
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
     ports: ["29092:29092"]
     volumes:
       - kafka-data:/var/lib/kafka/data
@@ -62,6 +66,7 @@ services:
       test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 >/dev/null 2>&1"]
       interval: 10s
       retries: 20
+    restart: unless-stopped
     mem_limit: 1536m
     logging: *default-logging
 
@@ -79,6 +84,7 @@ services:
       test: ["CMD-SHELL", "curl -fs http://localhost:8080/health/ready >/dev/null"]
       interval: 10s
       retries: 30
+    restart: unless-stopped
     mem_limit: 640m
     logging: *default-logging
 
@@ -107,6 +113,7 @@ services:
       test: ["CMD-SHELL", "curl -fs http://localhost:8083/ >/dev/null"]
       interval: 10s
       retries: 30
+    restart: unless-stopped
     mem_limit: 1g
     logging: *default-logging
 
@@ -123,6 +130,7 @@ services:
       KAFKA_CLUSTERS_0_KAFKACONNECT_0_ADDRESS: http://connect:8083
       JAVA_OPTS: -Xmx256m
     ports: ["8080:8080"]
+    restart: unless-stopped
     mem_limit: 512m
     logging: *default-logging
 
@@ -141,7 +149,7 @@ services:
         {"identities":[{"name":"tidewater","credentials":[{"accessKey":"$$S3_ACCESS_KEY","secretKey":"$$S3_SECRET_KEY"}],"actions":["Admin","Read","Write","List","Tagging"]}]}
         JSON
         exec weed server -dir=/data -ip=object-store -ip.bind=0.0.0.0 -volume.max=0 \
-          -s3 -s3.port=8333 -s3.config=/tmp/s3.json
+          -volume.index=leveldb -s3 -s3.port=8333 -s3.config=/tmp/s3.json
     ports: ["8333:8333", "8888:8888"]
     volumes:
       - s3-data:/data
@@ -149,7 +157,8 @@ services:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:9333/cluster/status && wget -q -O /dev/null http://localhost:8333/healthz"]
       interval: 5s
       retries: 30
-    mem_limit: 512m
+    restart: unless-stopped
+    mem_limit: 1g
     logging: *default-logging
 
   object-store-init:
@@ -259,7 +268,30 @@ services:
       test: ["CMD-SHELL", "pg_isready -U ${WH_PG_USER} -d ${WH_PG_DB}"]
       interval: 5s
       retries: 20
+    restart: unless-stopped
     mem_limit: 768m
+    logging: *default-logging
+
+  spark-loader:
+    # Silver -> warehouse every 30 s, so live dashboard tiles move with the simulator.
+    image: tidewater-spark:local
+    profiles: ["wh", "all"]
+    depends_on:
+      postgres-wh: { condition: service_healthy }
+    environment: *spark-env
+    command:
+      - /opt/spark/bin/spark-submit
+      - --master
+      - local[1]
+      - --driver-memory
+      - 768m
+      - --conf
+      - spark.ui.port=4042
+      - jobs/load_warehouse.py
+      - --interval
+      - "30"
+    restart: unless-stopped
+    mem_limit: 1280m
     logging: *default-logging
 
   dbt:
@@ -288,7 +320,12 @@ services:
       postgres-wh: { condition: service_healthy }
     environment:
       JAVA_OPTS: -Xmx768m
+      # Keep Metabase's own app DB on a volume so dashboards survive recreation.
+      MB_DB_FILE: /metabase-data/metabase.db
     ports: ["3000:3000"]
+    volumes:
+      - metabase-data:/metabase-data
+    restart: unless-stopped
     mem_limit: 1g
     logging: *default-logging
 
@@ -297,3 +334,4 @@ volumes:
   pg-wh-data:
   kafka-data:
   s3-data:
+  metabase-data:
