@@ -20,6 +20,6 @@ with DAG(
     # Stale sources should be visible but must not block the build: the build still
     # brings everything up to date with whatever has arrived.
     freshness = dbt("source_freshness", "source", "freshness")
-    build = dbt("dbt_build", "build", trigger_rule="all_done")
+    build = dbt("dbt_build", "build", record=True, trigger_rule="all_done")
 
     load >> freshness >> build

@@ -47,6 +47,6 @@ with DAG(
         "updated_at >= '{{ params.start_date }}' and updated_at < '{{ params.end_date }}'",
     )
     load = spark_job("load_warehouse", "load_warehouse.py", "--table", "{{ params.table }}")
-    build = dbt("dbt_build", "build")
+    build = dbt("dbt_build", "build", record=True)
 
     validate >> backfill >> load >> build

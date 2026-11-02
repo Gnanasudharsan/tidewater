@@ -42,6 +42,16 @@ def build_spark(app_name: str, settings: Settings) -> SparkSession:
         .config("spark.hadoop.fs.s3a.access.key", settings.s3_access_key)
         .config("spark.hadoop.fs.s3a.secret.key", settings.s3_secret_key)
     )
+    if settings.openlineage_url:
+        # Emit OpenLineage run events (inputs, outputs, schemas) to Marquez.
+        builder = (
+            builder.config(
+                "spark.extraListeners", "io.openlineage.spark.agent.OpenLineageSparkListener"
+            )
+            .config("spark.openlineage.transport.type", "http")
+            .config("spark.openlineage.transport.url", settings.openlineage_url)
+            .config("spark.openlineage.namespace", "tidewater")
+        )
     spark = builder.getOrCreate()
     spark.sparkContext.setLogLevel("WARN")
     return spark

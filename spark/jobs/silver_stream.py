@@ -21,11 +21,13 @@ from delta.tables import DeltaTable
 from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql import functions as F
 
+from tidewater_spark import lineage, metrics
 from tidewater_spark.cdc import LINEAGE, business_columns, decode_table, silver_columns
 from tidewater_spark.config import Settings
 from tidewater_spark.dq import DQ_REASONS, split_by_rules
 from tidewater_spark.merge import classify_against_target, latest_per_key, merge_into_silver
 from tidewater_spark.registry import SchemaRegistry
+from tidewater_spark.schema_archive import SchemaArchive
 from tidewater_spark.session import build_spark
 from tidewater_spark.tables import TableContract, load_contracts
 
@@ -78,7 +80,7 @@ def process_batch(
     spark: SparkSession,
     settings: Settings,
     contracts: dict[str, TableContract],
-    registry: SchemaRegistry,
+    schemas: SchemaArchive,
     bronze_batch: DataFrame,
     batch_id: int,
 ) -> dict:
@@ -93,7 +95,7 @@ def process_batch(
             log.warning("no contract for table %s; leaving its events in bronze only", table)
             continue
         changes, undecodable = decode_table(
-            bronze_batch.where(F.col("source_table") == table), registry
+            bronze_batch.where(F.col("source_table") == table), schemas
         )
         if undecodable is not None:
             quarantined.append(quarantine_rows(undecodable, table, None))
@@ -140,8 +142,13 @@ def process_batch(
                 to_merge,
                 contract.primary_key,
                 what=f"silver.{contract.name}",
+                # A concurrent backfill commits every few seconds; the stream must
+                # outlast it rather than crash (30 s max backoff, ~20+ minutes total).
+                max_attempts=50,
             )
             stats[contract.name] = n if attempts == 1 else f"{n} ({attempts} attempts)"
+            metrics.MERGED.labels(contract.name).inc(n)
+            metrics.CONFLICT_RETRIES.inc(attempts - 1)
             if ts:
                 source_ts_micros.append(ts)
 
@@ -150,7 +157,11 @@ def process_batch(
         committed = dt.datetime.now(dt.timezone.utc).timestamp() * 1e6
         stats["latency_p95_s"] = round((committed - min(t[0] for t in source_ts_micros)) / 1e6, 1)
         stats["latency_p50_s"] = round((committed - min(t[1] for t in source_ts_micros)) / 1e6, 1)
+        metrics.LATENCY.labels("0.95").set(stats["latency_p95_s"])
+        metrics.LATENCY.labels("0.5").set(stats["latency_p50_s"])
 
+    metrics.QUARANTINED.inc(stats.get("quarantined", 0))
+    metrics.LATE.inc(stats.get("late", 0))
     for _, df in pending:
         df.unpersist()
     bronze_batch.unpersist()
@@ -163,8 +174,18 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     settings = Settings.from_env()
     contracts = load_contracts()
-    registry = SchemaRegistry(settings.schema_registry_url)
     spark = build_spark("tidewater-silver-stream", settings)
+    metrics.watch(spark, "silver")
+    lineage.emit(
+        settings,
+        "silver_stream",
+        [lineage.lake(settings, settings.bronze_path)],
+        [lineage.lake(settings, settings.silver_path(t)) for t in sorted(contracts)]
+        + [lineage.lake(settings, settings.quarantine_path)],
+    )
+    schemas = SchemaArchive(
+        spark, settings.schema_archive_path, SchemaRegistry(settings.schema_registry_url)
+    )
 
     while not DeltaTable.isDeltaTable(spark, settings.bronze_path):
         log.info("waiting for bronze table at %s", settings.bronze_path)
@@ -172,11 +193,12 @@ def main() -> None:
 
     query = (
         spark.readStream.format("delta")
-        .option("maxFilesPerTrigger", 1000)
+        # Bounded batches keep a full replay (rebuild from bronze) within the driver's memory.
+        .option("maxFilesPerTrigger", 200)
         .load(settings.bronze_path)
         .writeStream.queryName("silver")
         .foreachBatch(
-            lambda df, batch_id: process_batch(spark, settings, contracts, registry, df, batch_id)
+            lambda df, batch_id: process_batch(spark, settings, contracts, schemas, df, batch_id)
         )
         .option("checkpointLocation", settings.silver_checkpoint)
         .trigger(processingTime=settings.silver_trigger)

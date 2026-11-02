@@ -18,6 +18,7 @@ RUN cd /opt/spark/jars && for path in \
       org/apache/hadoop/hadoop-aws/3.3.4/hadoop-aws-3.3.4.jar \
       com/amazonaws/aws-java-sdk-bundle/1.12.262/aws-java-sdk-bundle-1.12.262.jar \
       org/postgresql/postgresql/42.7.4/postgresql-42.7.4.jar \
+      io/openlineage/openlineage-spark_2.12/1.23.0/openlineage-spark_2.12-1.23.0.jar \
     ; do curl -fsSLO "${MAVEN}/${path}"; done
 
 COPY log4j2.properties /opt/spark/conf/log4j2.properties

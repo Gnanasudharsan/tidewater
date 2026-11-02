@@ -1,0 +1,20 @@
+# Alerts go to GRAFANA_ALERT_WEBHOOK_URL. The default is the local alert-sink
+# container (it logs every alert). For Slack or Discord, change `type` to `slack`
+# or `discord` and set the URL to the channel's incoming-webhook URL.
+apiVersion: 1
+contactPoints:
+  - orgId: 1
+    name: tidewater-alerts
+    receivers:
+      - uid: tidewater-webhook
+        type: webhook
+        settings:
+          url: $GRAFANA_ALERT_WEBHOOK_URL
+          httpMethod: POST
+policies:
+  - orgId: 1
+    receiver: tidewater-alerts
+    group_by: [alertname]
+    group_wait: 10s
+    group_interval: 1m
+    repeat_interval: 1h

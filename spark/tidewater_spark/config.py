@@ -43,6 +43,7 @@ class Settings:
     wh_db: str = "analytics"
     wh_user: str = ""
     wh_password: str = ""
+    openlineage_url: str = ""
 
     @property
     def lakehouse(self) -> str:
@@ -51,6 +52,10 @@ class Settings:
     @property
     def bronze_path(self) -> str:
         return f"{self.lakehouse}/bronze/cdc_events"
+
+    @property
+    def schema_archive_path(self) -> str:
+        return f"{self.lakehouse}/bronze/_schemas"
 
     @property
     def bronze_checkpoint(self) -> str:
@@ -123,4 +128,5 @@ class Settings:
             wh_db=_env("WH_PGDATABASE", "analytics"),
             wh_user=_env("WH_PGUSER", ""),
             wh_password=_env("WH_PGPASSWORD", ""),
+            openlineage_url=_env("OPENLINEAGE_URL", ""),
         )

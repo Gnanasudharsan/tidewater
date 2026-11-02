@@ -158,7 +158,7 @@ services:
       interval: 5s
       retries: 30
     restart: unless-stopped
-    mem_limit: 1g
+    mem_limit: 1536m
     logging: *default-logging
 
   object-store-init:
@@ -202,16 +202,17 @@ services:
       WH_PGDATABASE: ${WH_PG_DB}
       WH_PGUSER: ${WH_PG_USER}
       WH_PGPASSWORD: ${WH_PG_PASSWORD}
+      OPENLINEAGE_URL: ${OPENLINEAGE_URL:-}
     command:
       - /opt/spark/bin/spark-submit
       - --master
       - local[2]
       - --driver-memory
-      - 1200m
+      - 900m
       - jobs/bronze_ingest.py
     ports: ["4040:4040"]
     restart: unless-stopped
-    mem_limit: 2g
+    mem_limit: 1536m
     logging: *default-logging
 
   spark-silver:
@@ -234,6 +235,107 @@ services:
     ports: ["4041:4041"]
     restart: unless-stopped
     mem_limit: 2g
+    logging: *default-logging
+
+  # ---------------------------------------------------------------- observability
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    profiles: ["obs", "all"]
+    command: ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.retention.time=7d"]
+    ports: ["9090:9090"]
+    volumes:
+      - ./infra/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    restart: unless-stopped
+    mem_limit: 384m
+    logging: *default-logging
+
+  kafka-exporter:
+    image: danielqsj/kafka-exporter:v1.8.0
+    profiles: ["obs", "all"]
+    command: ["--kafka.server=kafka:9092"]
+    depends_on:
+      kafka: { condition: service_healthy }
+    restart: unless-stopped
+    mem_limit: 64m
+    logging: *default-logging
+
+  grafana:
+    image: grafana/grafana:11.2.2
+    profiles: ["obs", "all"]
+    depends_on: [prometheus]
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
+      # Read-only anonymous viewing, so the dashboard opens without a login locally.
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/tidewater.json
+      GRAFANA_ALERT_WEBHOOK_URL: ${GRAFANA_ALERT_WEBHOOK_URL:-http://alert-sink:9000/}
+      WH_PG_USER: ${WH_PG_USER}
+      WH_PG_PASSWORD: ${WH_PG_PASSWORD}
+      WH_PG_DB: ${WH_PG_DB}
+    ports: ["3001:3000"]
+    volumes:
+      - ./infra/observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infra/observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    restart: unless-stopped
+    mem_limit: 256m
+    logging: *default-logging
+
+  alert-sink:
+    # Stand-in for Slack/Discord: logs every alert Grafana sends.
+    image: python:3.11-slim
+    profiles: ["obs", "all"]
+    command:
+      - python
+      - -c
+      - |
+        import json, http.server
+        class H(http.server.BaseHTTPRequestHandler):
+            def do_POST(self):
+                body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+                for a in body.get("alerts", []):
+                    print(f"ALERT {a['status'].upper()}: {a['labels'].get('alertname')} - "
+                          f"{a['annotations'].get('summary', '')}", flush=True)
+                self.send_response(200); self.end_headers()
+            def log_message(self, *args): pass
+        http.server.HTTPServer(("", 9000), H).serve_forever()
+    restart: unless-stopped
+    mem_limit: 64m
+    logging: *default-logging
+
+  # ---------------------------------------------------------------- lineage
+  marquez:
+    image: marquezproject/marquez:0.50.0
+    profiles: ["lineage", "all"]
+    depends_on:
+      postgres-wh: { condition: service_healthy }
+    environment:
+      MARQUEZ_PORT: 5000
+      MARQUEZ_ADMIN_PORT: 5001
+      POSTGRES_HOST: postgres-wh
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: marquez
+      POSTGRES_USER: marquez
+      POSTGRES_PASSWORD: marquez
+      JAVA_OPTS: -Xmx384m
+    ports: ["${MARQUEZ_HOST_PORT:-5005}:5000"]  # macOS AirPlay owns host port 5000
+    restart: unless-stopped
+    mem_limit: 768m
+    logging: *default-logging
+
+  marquez-web:
+    image: marquezproject/marquez-web:0.50.0
+    profiles: ["lineage", "all"]
+    depends_on: [marquez]
+    environment:
+      MARQUEZ_HOST: marquez
+      MARQUEZ_PORT: 5000
+      WEB_PORT: 3000
+    ports: ["3002:3000"]
+    restart: unless-stopped
+    mem_limit: 256m
     logging: *default-logging
 
   # ---------------------------------------------------------------- orchestration
@@ -346,6 +448,8 @@ services:
       WH_PGDATABASE: ${WH_PG_DB}
       WH_PGUSER: ${WH_PG_USER}
       WH_PGPASSWORD: ${WH_PG_PASSWORD}
+      OPENLINEAGE_URL: ${OPENLINEAGE_URL:-}
+      OPENLINEAGE_NAMESPACE: tidewater
     volumes:
       - ./dbt:/dbt
     entrypoint: ["dbt"]
@@ -374,4 +478,6 @@ volumes:
   pg-wh-data:
   kafka-data:
   s3-data:
+  prometheus-data:
+  grafana-data:
   metabase-data:

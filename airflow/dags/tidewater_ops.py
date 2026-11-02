@@ -59,6 +59,9 @@ def spark_job(task_id: str, script: str, *args: str, **kwargs) -> DockerOperator
     )
 
 
-def dbt(task_id: str, *args: str, **kwargs) -> DockerOperator:
-    """Run a dbt command in the tidewater-dbt image (project baked in)."""
+def dbt(task_id: str, *args: str, record: bool = False, **kwargs) -> DockerOperator:
+    """Run a dbt command in the tidewater-dbt image (project baked in). With record=True,
+    node timings are appended to marts.dbt_run_results for the Grafana dbt panels."""
+    if record:
+        kwargs["entrypoint"] = ["/dbt/scripts/build_and_record.sh"]
     return _container_task(task_id, "tidewater-dbt:local", list(args), mem_limit="1g", **kwargs)

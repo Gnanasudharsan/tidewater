@@ -1,0 +1,141 @@
+# Provisioned alert rules (Grafana unified alerting). Thresholds mirror the SLOs in docs/design.md.
+apiVersion: 1
+groups:
+- orgId: 1
+  name: tidewater-pipeline
+  folder: Tidewater
+  interval: 30s
+  rules:
+  - uid: silver-latency-slo
+    title: Silver p95 latency above the 60 s SLO
+    condition: C
+    for: 5m
+    noDataState: OK
+    execErrState: Error
+    labels:
+      severity: page
+      service: tidewater
+    annotations:
+      summary: Source-commit to silver-commit p95 latency has been above 60 s for
+        5 minutes.
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: prometheus
+      model:
+        refId: A
+        expr: max(tidewater_silver_latency_seconds{quantile="0.95"})
+        instant: true
+    - refId: C
+      datasourceUid: __expr__
+      model:
+        refId: C
+        type: threshold
+        expression: A
+        conditions:
+        - evaluator:
+            type: gt
+            params:
+            - 60
+  - uid: bronze-falling-behind
+    title: Bronze is falling behind Kafka
+    condition: C
+    for: 2m
+    noDataState: OK
+    execErrState: Error
+    labels:
+      severity: page
+      service: tidewater
+    annotations:
+      summary: Bronze is more than 5,000 offsets behind the latest Kafka offset on
+        some partition.
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: prometheus
+      model:
+        refId: A
+        expr: max(tidewater_stream_offsets_behind_latest{stream="bronze",stat="max"})
+        instant: true
+    - refId: C
+      datasourceUid: __expr__
+      model:
+        refId: C
+        type: threshold
+        expression: A
+        conditions:
+        - evaluator:
+            type: gt
+            params:
+            - 5000
+  - uid: stream-stalled
+    title: A streaming job stopped reporting progress
+    condition: C
+    for: 1m
+    noDataState: Alerting
+    execErrState: Error
+    labels:
+      severity: page
+      service: tidewater
+    annotations:
+      summary: 'No progress event for 2 minutes: the stream is down, stuck, or blocked
+        on storage.'
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: prometheus
+      model:
+        refId: A
+        expr: 'max by (stream) ((time() - tidewater_stream_last_progress_timestamp_seconds) or on (stream)
+            ((1 - up{job="streams"}) * 1e9))'
+        instant: true
+    - refId: C
+      datasourceUid: __expr__
+      model:
+        refId: C
+        type: threshold
+        expression: A
+        conditions:
+        - evaluator:
+            type: gt
+            params:
+            - 120
+  - uid: dq-quarantine
+    title: Rows are being quarantined
+    condition: C
+    for: 0s
+    noDataState: OK
+    execErrState: Error
+    labels:
+      severity: page
+      service: tidewater
+    annotations:
+      summary: Silver quarantined rows in the last 10 minutes; see silver.dq_quarantine
+        for reasons.
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: prometheus
+      model:
+        refId: A
+        expr: sum(increase(tidewater_silver_quarantined_total[10m]))
+        instant: true
+    - refId: C
+      datasourceUid: __expr__
+      model:
+        refId: C
+        type: threshold
+        expression: A
+        conditions:
+        - evaluator:
+            type: gt
+            params:
+            - 0
