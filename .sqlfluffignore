@@ -1,0 +1,2 @@
+# psql meta-commands (\gexec) are not SQL; sqlfluff cannot parse them.
+infra/postgres-wh/init/02_airflow.sql
