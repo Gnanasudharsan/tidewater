@@ -16,6 +16,9 @@ def build_spark(app_name: str, settings: Settings) -> SparkSession:
         )
         .config("spark.sql.session.timeZone", "UTC")
         .config("spark.sql.shuffle.partitions", "4")
+        # Standard Parquet timestamps (not legacy INT96) so external readers (Snowflake
+        # COPY) see real TIMESTAMP values.
+        .config("spark.sql.parquet.outputTimestampType", "TIMESTAMP_MICROS")
         # FileContext-based checkpointing rejects SeaweedFS directories (it sees them as
         # files). The FileSystem-based manager works there and on AWS S3. See devlog.
         .config(

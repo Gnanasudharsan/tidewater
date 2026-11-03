@@ -3,7 +3,9 @@
     spark-submit jobs/load_snowflake.py [--table orders ...]
 
 Mirrors load_warehouse.py (ADR 0008) against Snowflake: Change Data Feed by Delta
-version with a table-id check, rows staged with write_pandas, then one transaction
+version with a table-id check; changed rows are written by Spark as Parquet, PUT to
+an internal stage and COPYed into a staging table (bulk path: nothing is collected on
+the driver, so millions of rows are fine); then one transaction
 that evolves the schema, MERGEs with the (lsn, offset) guard, moves the bookmark
 and logs the rows delivered (read by the snowflake_cost dbt model).
 
@@ -15,10 +17,11 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+import shutil
+import uuid
 
 import snowflake.connector
 from delta.tables import DeltaTable
-from snowflake.connector.pandas_tools import write_pandas
 
 from tidewater_spark import snowflake_sql as sql
 from tidewater_spark.cdf import changed_rows, ensure_cdf
@@ -63,17 +66,24 @@ def load_table(spark, settings: Settings, conn, contract: TableContract) -> None
         return
 
     rows, mode = changed_rows(spark, path, pk, since, current)
-    pdf = rows.toPandas()
-    pdf.columns = [c.upper() for c in pdf.columns]
-    if len(pdf):
-        write_pandas(
-            conn, pdf, sql.staging(name), auto_create_table=True, overwrite=True,
-            quote_identifiers=False, use_logical_type=True,
-        )  # fmt: skip
+    rows = rows.persist()
+    n = rows.count()
+    if n:
+        run = uuid.uuid4().hex[:12]
+        local = f"/tmp/tidewater_sf/{name}/{run}"
+        rows.coalesce(8).write.mode("overwrite").parquet(local)
+        cur.execute(
+            sql.create_staging(name, [(f.name, f.dataType.simpleString()) for f in rows.schema])
+        )
+        cur.execute(sql.put(local, f"{name}/{run}"))
+        cur.execute(sql.copy_into(name, f"{name}/{run}"))
+        shutil.rmtree(local, ignore_errors=True)
+    rows.unpersist()
     try:
         cur.execute("begin")
-        if len(pdf):
-            cur.execute(sql.create_target(name))
+        if n:
+            for stmt in sql.create_target(name):
+                cur.execute(stmt)
             cur.execute(f"describe table SILVER.{sql.staging(name)}")
             stg_cols = {r[0]: r[1] for r in cur.fetchall()}
             cur.execute(f"describe table SILVER.{name.upper()}")
@@ -81,13 +91,13 @@ def load_table(spark, settings: Settings, conn, contract: TableContract) -> None
             for stmt in sql.add_columns(name, stg_cols, target_cols):
                 cur.execute(stmt)
             cur.execute(sql.merge(name, list(stg_cols), pk))
-        cur.execute(sql.save_state(), (name, current, table_id, len(pdf)))
-        cur.execute(sql.log_load(), (name, len(pdf), current))
+        cur.execute(sql.save_state(), (name, current, table_id, n))
+        cur.execute(sql.log_load(), (name, n, current))
         cur.execute("commit")
     except Exception:
         cur.execute("rollback")
         raise
-    log.info("%s: loaded %d rows into Snowflake (%s)", name, len(pdf), mode)
+    log.info("%s: loaded %d rows into Snowflake (%s)", name, n, mode)
 
 
 def main() -> None:
@@ -102,6 +112,7 @@ def main() -> None:
     with conn.cursor() as cur:
         cur.execute(sql.CREATE_STATE)
         cur.execute(sql.CREATE_LOG)
+        cur.execute(sql.CREATE_STAGE)
     for name in args.table or sorted(contracts):
         load_table(spark, settings, conn, contracts[name])
     conn.close()
