@@ -93,6 +93,10 @@ def main() -> int:
             print(f"  sample unexplained keys in {name}:")
             bad_keys.limit(5).show(truncate=False)
         cmp.unpersist()
+        # Each table can be millions of rows: release everything before the next one so
+        # memory doesn't accumulate across tables (the job was OOM-killed at 5M rows).
+        spark.catalog.clearCache()
+        spark.sparkContext._jvm.System.gc()
 
     print("\nRESULT:", "FAIL" if failed else "PASS (100% match: counts and row hashes)")
     spark.stop()

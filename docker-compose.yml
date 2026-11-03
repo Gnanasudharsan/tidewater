@@ -218,7 +218,7 @@ services:
       - ./.secrets:/secrets:ro
     ports: ["4040:4040"]
     restart: unless-stopped
-    mem_limit: 1536m
+    mem_limit: 2g  # also used by one-off jobs (reconcile, backfill)
     logging: *default-logging
 
   spark-silver:
