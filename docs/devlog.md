@@ -15,6 +15,10 @@ Bugs hit, root causes, and fixes. Newest first.
   the CI runner) is still not reproduced locally, so silver now waits for the
   concrete fact it needs: a committed `.json` in the transaction log, checked
   through the Hadoop FileSystem directly.
+  Since the fix: 4 of 4 integration runs passed (the original run plus 3 reruns of
+  run 41576893536). Before it, the stall hit 2 of about 6 runs. Encouraging, but at
+  that failure rate 4 straight passes still happen ~20% of the time by luck: keep
+  watching CI before calling it closed.
 - The README now leads with measured results, including the misses (latency SLO at
   scale, the inconclusive tuning experiment), because those are what reviewers trust.
 
