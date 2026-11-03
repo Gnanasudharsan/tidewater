@@ -52,3 +52,16 @@ def test_falls_back_to_full_load_when_cdf_range_is_unavailable(spark, tmp_path):
     upsert(spark, path, [(2, "a")])  # version 1, written without CDF
     rows, mode = changed_rows(spark, path, PK, 0, version(spark, path))
     assert mode.startswith("full") and rows.count() == 2
+
+
+def test_delta_log_committed_waits_for_a_real_commit(spark, tmp_path):
+    from tidewater_spark.session import delta_log_committed
+
+    path = str(tmp_path / "t")
+    assert not delta_log_committed(spark, path)  # nothing there yet
+    (tmp_path / "t" / "_delta_log").mkdir(parents=True)
+    assert not delta_log_committed(spark, path)  # an empty log directory is not a table
+    spark.createDataFrame([(1, "a")], "id long, status string").write.format("delta").mode(
+        "overwrite"
+    ).save(path)
+    assert delta_log_committed(spark, path)

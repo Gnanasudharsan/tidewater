@@ -58,3 +58,20 @@ def build_spark(app_name: str, settings: Settings) -> SparkSession:
     spark = builder.getOrCreate()
     spark.sparkContext.setLogLevel("WARN")
     return spark
+
+
+def delta_log_committed(spark: SparkSession, path: str) -> bool:
+    """True once a Delta table at `path` has at least one committed version.
+
+    Checks the transaction log through the Hadoop FileSystem directly. In CI,
+    `DeltaTable.isDeltaTable` kept returning False for minutes after bronze had
+    committed version 0 on SeaweedFS (cause not reproduced locally), so code that
+    waits for a table to appear waits for this concrete fact instead.
+    """
+    jvm = spark._jvm
+    log = jvm.org.apache.hadoop.fs.Path(path.rstrip("/") + "/_delta_log")
+    fs = log.getFileSystem(spark._jsc.hadoopConfiguration())
+    try:
+        return any(s.getPath().getName().endswith(".json") for s in fs.listStatus(log))
+    except Exception:  # noqa: BLE001 - FileNotFound and friends mean "not yet"
+        return False

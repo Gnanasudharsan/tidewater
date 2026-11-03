@@ -18,7 +18,6 @@ import logging
 import time
 from concurrent.futures import ThreadPoolExecutor
 
-from delta.tables import DeltaTable
 from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql import functions as F
 
@@ -29,7 +28,7 @@ from tidewater_spark.dq import DQ_REASONS, split_by_rules
 from tidewater_spark.merge import classify_against_target, latest_per_key, merge_into_silver
 from tidewater_spark.registry import SchemaRegistry
 from tidewater_spark.schema_archive import SchemaArchive
-from tidewater_spark.session import build_spark
+from tidewater_spark.session import build_spark, delta_log_committed
 from tidewater_spark.tables import TableContract, load_contracts
 
 log = logging.getLogger("silver_stream")
@@ -204,7 +203,7 @@ def main() -> None:
         spark, settings.schema_archive_path, SchemaRegistry(settings.schema_registry_url)
     )
 
-    while not DeltaTable.isDeltaTable(spark, settings.bronze_path):
+    while not delta_log_committed(spark, settings.bronze_path):
         log.info("waiting for bronze table at %s", settings.bronze_path)
         time.sleep(10)
 

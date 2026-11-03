@@ -8,6 +8,13 @@ Bugs hit, root causes, and fixes. Newest first.
   memory limit, lowered to 1.5 GB in week 8, and memory piled up across 4.5M rows.
   Reconcile now releases its cache between tables, the limit is back to 2 GB, and the
   demo fails loudly unless reconciliation passes. The rerun passed end to end.
+- **The intermittent CI stall finally left evidence.** The Week 7 diagnostics showed
+  bronze's `_delta_log/00000000000000000000.*` committed at 04:04:55 while silver
+  logged "waiting for bronze table" until 04:11:53: `DeltaTable.isDeltaTable` kept
+  returning False for a table that existed. The trigger (Delta/S3A on SeaweedFS on
+  the CI runner) is still not reproduced locally, so silver now waits for the
+  concrete fact it needs: a committed `.json` in the transaction log, checked
+  through the Hadoop FileSystem directly.
 - The README now leads with measured results, including the misses (latency SLO at
   scale, the inconclusive tuning experiment), because those are what reviewers trust.
 
