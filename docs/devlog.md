@@ -2,6 +2,22 @@
 
 Bugs hit, root causes, and fixes. Newest first.
 
+## 2026-11-02: Week 9, Snowflake first contact
+- **Google sign-in means no password for Terraform.** Terraform logs in as a
+  key-pair-only `TERRAFORM_ADMIN` service user instead, so there's no password anywhere.
+- **The plan review caught a missing grant.** The loader owns the SILVER tables, and
+  dbt's role could only `USAGE` the schema. A future `SELECT` grant fixed it before
+  the first dbt run could fail.
+- **`toPandas` + `write_pandas` died at scale** (exit 137) once benchmarks had grown
+  order_items to 2.6M rows. The loader now writes Parquet with Spark, `PUT`s it to
+  an internal stage and `COPY`s it: nothing is collected on the driver. Spark's
+  default INT96 timestamps were switched to TIMESTAMP_MICROS for Snowflake.
+- **Portability gap that SQL macros can't catch:** staging models select
+  `_wh_loaded_at`, which only the Postgres loader stamped. The Snowflake MERGE now
+  stamps it too. Afterwards dbt passed 81/81 on Snowflake in 33.5 s.
+- **A key that worked stopped working (`JWT token is invalid`).** The Docker VM's
+  clock was 5 minutes behind the Mac after a sleep; key-pair JWTs are time-bound.
+
 ## 2026-11-02: Week 9, benchmarks
 - **The first sweep's "achieved rate" was wrong.** Parallel simulators raced: one
   deleted an order between another picking it and locking it (`fetchone()` was

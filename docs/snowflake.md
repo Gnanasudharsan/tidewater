@@ -59,7 +59,27 @@ Export everything into the repo: `bench/results/*.csv`, the `snowflake_cost` tab
 query history for dbt runs, and screenshots. Then `terraform destroy` in
 `terraform/snowflake` (via `make sf-plan`-style docker run) or let the trial lapse.
 
+## SSO-only accounts (Google sign-in)
+There is no password to give Terraform. Create a key-pair-only admin once in a
+Snowsight worksheet (public key from `.secrets/terraform_key.pub`), and Terraform
+logs in with `.secrets/terraform_key.p8`:
+
+```sql
+create user TERRAFORM_ADMIN type = service default_role = accountadmin rsa_public_key = '<key>';
+grant role accountadmin to user TERRAFORM_ADMIN;
+```
+
+When provisioning is done, drop it (`drop user TERRAFORM_ADMIN;`) or move it to a
+smaller custom role plus a network policy.
+
 ## Status
-The Terraform validates against provider 1.0.5, the dbt project parses with
-`dbt-snowflake` 1.8.4, and the loader's SQL is unit-tested. **None of it has run
-against a live account yet**; expect small fixes on first contact.
+Live since 2026-11-02: `sf-apply` created 23 objects, silver loaded (5.05M rows,
+exact match), and `dbt build --target snowflake` passed 81/81 in 33.5 s. See
+[the first-run results](../bench/results/snowflake_first_run_20261102.md).
+
+## Troubleshooting
+- **`JWT token is invalid`** with a key that worked earlier: the Docker VM clock
+  drifted after the Mac slept (5 minutes behind, measured). Wait for Docker Desktop
+  to resync (compare `date -u` with `docker run --rm alpine date -u`).
+- **`Could not connect to Snowflake backend`** after long waits: the host lost
+  network (usually sleep). Keep the Mac awake for benchmark runs.
