@@ -45,6 +45,7 @@ bench: ## Throughput/latency sweep (RATES="100 500 1000 2000" STEP=180), results
 
 # ---- Snowflake (week 9). Credentials: SNOWFLAKE_* in .env, private key in .secrets/ ----
 SF_TF := docker run --rm -v $(PWD)/terraform/snowflake:/tf -w /tf --env-file .env \
+	-v $(PWD)/.secrets:/secrets:ro -e TF_VAR_private_key_path=/secrets/terraform_key.p8 \
 	-e TF_VAR_service_user_rsa_public_key hashicorp/terraform:1.9.8
 
 sf-keypair: ## Generate the service user's RSA key pair into .secrets/

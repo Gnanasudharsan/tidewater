@@ -5,6 +5,10 @@
 
 provider "snowflake" {
   role = "ACCOUNTADMIN"
+  # Key-pair login for the TERRAFORM_ADMIN service user (works with SSO-only accounts:
+  # no password anywhere). Falls back to SNOWFLAKE_PASSWORD if no key path is given.
+  authenticator = var.private_key_path == "" ? null : "SNOWFLAKE_JWT"
+  private_key   = var.private_key_path == "" ? null : file(var.private_key_path)
 }
 
 resource "snowflake_resource_monitor" "tidewater" {
@@ -115,4 +119,17 @@ resource "snowflake_grant_account_role" "service_roles" {
   for_each  = toset([snowflake_account_role.loader.name, snowflake_account_role.transformer.name])
   role_name = each.key
   user_name = snowflake_user.service.name
+}
+
+# The loader owns the SILVER tables it creates; dbt (transformer) must be able to read
+# every one of them, including tables created after this apply.
+resource "snowflake_grant_privileges_to_account_role" "transformer_selects_silver" {
+  account_role_name = snowflake_account_role.transformer.name
+  privileges        = ["SELECT"]
+  on_schema_object {
+    future {
+      object_type_plural = "TABLES"
+      in_schema          = "\"${snowflake_database.tidewater.name}\".\"${snowflake_schema.layer["SILVER"].name}\""
+    }
+  }
 }

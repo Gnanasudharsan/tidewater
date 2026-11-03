@@ -7,6 +7,12 @@ variable "service_user_rsa_public_key" {
   type        = string
 }
 
+variable "private_key_path" {
+  description = "Private key for Terraform's own login (TERRAFORM_ADMIN). Empty = password auth."
+  type        = string
+  default     = ""
+}
+
 variable "monthly_credit_quota" {
   description = "Hard cap: the warehouse is suspended when this many credits are used in a month."
   type        = number
