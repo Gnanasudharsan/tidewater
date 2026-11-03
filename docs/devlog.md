@@ -2,6 +2,15 @@
 
 Bugs hit, root causes, and fixes. Newest first.
 
+## 2026-11-03: Week 10, packaging
+- **The first `make demo` claimed success it hadn't earned.** Its reconciliation was
+  OOM-killed after two tables (exit 137): one-off jobs reuse the bronze service's
+  memory limit, lowered to 1.5 GB in week 8, and memory piled up across 4.5M rows.
+  Reconcile now releases its cache between tables, the limit is back to 2 GB, and the
+  demo fails loudly unless reconciliation passes. The rerun passed end to end.
+- The README now leads with measured results, including the misses (latency SLO at
+  scale, the inconclusive tuning experiment), because those are what reviewers trust.
+
 ## 2026-11-02: Week 9, Snowflake first contact
 - **Google sign-in means no password for Terraform.** Terraform logs in as a
   key-pair-only `TERRAFORM_ADMIN` service user instead, so there's no password anywhere.
