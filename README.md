@@ -27,7 +27,8 @@ _Benchmarks land in week 9. No numbers are claimed here until they are measured.
 | Duplicate PKs in silver after chaos tests | 0 | **0**: all 6 chaos tests end in 100% reconciliation ([results](#chaos-suite)) |
 | Source reconciliation | 100% | — |
 | Throughput (sources) | — | **2,000 business events/s** (5,232 CDC records/s) with 0 Kafka lag ([bench](bench/README.md)) |
-| Snowflake credits per 1M events | — | — |
+| Snowflake credits per 1M rows (delivered + transformed) | — | **~0.059** on X-Small ([bench](bench/README.md#5-snowflake-cost)) |
+| Full dbt rebuild, same data (2.4M order lines) | — | **16.3 s** Postgres vs **31.7 s** Snowflake: level on heavy models, Snowflake loses on per-query overhead ([bench](bench/README.md#4-postgres-vs-snowflake-same-dbt-project-same-data)) |
 
 ## Quickstart
 
@@ -181,7 +182,7 @@ tests/        unit, Airflow DAG, chaos and end-to-end integration tests
 - [x] **Week 6:** SCD2 customer dimension, incremental facts, dbt-expectations, MetricFlow metrics (GMV, AOV, refund rate, repeat-customer rate), docs site, Metabase dashboard as code
 - [x] **Week 7:** 4 Airflow DAGs (via a Docker socket proxy), dbt Slim CI, DAG tests, Compose integration test in CI, Terraform for S3
 - [x] **Week 8:** Prometheus + Grafana + alerts, OpenLineage/Marquez, 6 chaos tests with runbooks, audit trace, schema archive
-- [~] **Week 9:** local benchmark sweep + A/B/A tuning experiment done ([bench](bench/README.md)); Snowflake Terraform, loader, dbt target and cost mart ready ([setup](docs/snowflake.md)), trial not started
+- [x] **Week 9:** benchmark sweep, A/B/A tuning experiment, Snowflake provisioned with Terraform, 5M rows loaded (exact match), same dbt project 81/81 on Snowflake, Postgres-vs-Snowflake timing and credits per million rows ([bench](bench/README.md))
 - [ ] **Week 10:** packaging and launch
 
 ## Trade-offs and future work

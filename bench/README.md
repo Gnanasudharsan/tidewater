@@ -72,8 +72,38 @@ conflict on every commit (chaos 06). The next experiment, same A/B/A method:
 2. **Partition silver by key range** (or Liquid Clustering when available), so a
    batch touches a few small files and the backfill and stream stop conflicting.
 
-## 4. Snowflake
+## 4. Postgres vs Snowflake (same dbt project, same data)
 
-Not run yet. The trial has to be started by the account owner; everything else is
-ready ([docs/snowflake.md](../docs/snowflake.md)). The `snowflake_cost` dbt model will
-add credits per million rows to this page.
+Both warehouses held identical live data (verified per table: 943,775 orders,
+2,360,035 order lines, 1,075,192 payments, 152,543 customers). `dbt build
+--full-refresh`, 8 threads, run from the laptop
+([csv](results/warehouse_comparison_20261103.csv)):
+
+| | Postgres 16 (local container) | Snowflake X-Small (AWS us-east-2) |
+|---|---|---|
+| nodes | 80 | 81 (+ `snowflake_cost`) |
+| **full rebuild, wall** | **16.3 s** | **31.7 s** |
+| `fct_orders` (944k rows) | 5.77 s | **3.07 s** |
+| `fct_order_items` (2.36M rows) | 3.84 s | 3.89 s |
+| 65 data tests, average | **0.54 s** | 1.28 s |
+
+**Reading it:** on the heavy models the two are level, and Snowflake is faster on
+the largest join. Snowflake loses overall on **per-statement overhead**: each of the
+65 small test queries pays a laptop-to-AWS round trip plus Snowflake's fixed query
+cost. At about 5M rows the workload is too small for Snowflake's strengths (scale-out,
+concurrency); the crossover point would need a larger dataset to find.
+
+## 5. Snowflake cost
+
+Measured with `INFORMATION_SCHEMA.WAREHOUSE_METERING_HISTORY` (near real time):
+
+| what | value |
+|---|---|
+| rows delivered by the loader | 5,054,321 (11 loads) |
+| credits used by `TIDEWATER_WH` | ~0.297 (all loads, 3 dbt builds incl. a full rebuild, tests, failed attempts) |
+| **credits per million rows delivered and transformed** | **~0.059** |
+
+All-in and conservative: it includes every query on the warehouse, and the most
+recent hour may not be fully metered yet. The resource monitor caps spend at 20
+credits/month. For the final hourly breakdown, build `marts.snowflake_cost` once
+`ACCOUNT_USAGE` has caught up (up to ~3 h lag).

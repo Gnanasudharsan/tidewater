@@ -17,7 +17,6 @@ Silver Delta -> TIDEWATER.SILVER via `make load-sf` (Parquet PUT/COPY, LSN-guard
   incremental, 1 snapshot, 65 data tests). The same project passes 80/80 on Postgres
   (`snowflake_cost` is Snowflake-only).
 
-Not measured yet: full-refresh timing on both warehouses, and credits per million
-rows (`marts.snowflake_cost`; ACCOUNT_USAGE lags about 3 h). Two attempts failed on
-the laptop's side (network drops while the Mac slept; Docker VM clock skew
-invalidating the key-pair JWT), not on Snowflake's.
+Measured afterwards (2026-11-03): full rebuild 31.7 s on Snowflake vs 16.3 s on
+Postgres over identical data, and ~0.059 credits per million rows. See
+[bench/README.md](../README.md#4-postgres-vs-snowflake-same-dbt-project-same-data).
