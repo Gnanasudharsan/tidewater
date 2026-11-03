@@ -1,0 +1,137 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 640" font-family="Inter, -apple-system, Segoe UI, Helvetica, Arial, sans-serif">
+  <title>Tidewater architecture</title>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#475569"/>
+    </marker>
+    <style>
+      .box { fill: #ffffff; stroke: #cbd5e1; stroke-width: 1.5; rx: 10; }
+      .title { font-size: 16px; font-weight: 700; fill: #0f172a; }
+      .sub { font-size: 12.5px; fill: #475569; }
+      .tag { font-size: 11.5px; font-weight: 600; fill: #0f172a; }
+      .lane { font-size: 13px; font-weight: 700; fill: #64748b; letter-spacing: 1px; }
+      .edge { stroke: #475569; stroke-width: 1.8; fill: none; marker-end: url(#arrow); }
+      .soft { stroke: #94a3b8; stroke-width: 1.4; stroke-dasharray: 5 4; fill: none; marker-end: url(#arrow); }
+      .edgelabel { font-size: 11.5px; fill: #334155; }
+    </style>
+  </defs>
+
+  <rect width="1280" height="640" fill="#f8fafc"/>
+  <text x="40" y="44" font-size="24" font-weight="800" fill="#0f172a">Tidewater</text>
+  <text x="168" y="44" font-size="15" fill="#475569">CDC lakehouse: exactly-once results from at-least-once delivery</text>
+
+  <!-- lane labels -->
+  <text x="40" y="92" class="lane">SOURCE &amp; CDC</text>
+  <text x="430" y="92" class="lane">LAKEHOUSE (DELTA ON S3)</text>
+  <text x="900" y="92" class="lane">WAREHOUSE &amp; BI</text>
+
+  <!-- Source & CDC -->
+  <rect x="40" y="108" width="170" height="92" class="box"/>
+  <text x="56" y="136" class="title">Postgres 16</text>
+  <text x="56" y="158" class="sub">5 OLTP tables</text>
+  <text x="56" y="178" class="sub">logical WAL + slot</text>
+
+  <rect x="40" y="236" width="170" height="92" class="box"/>
+  <text x="56" y="264" class="title">Debezium 2.7</text>
+  <text x="56" y="286" class="sub">Kafka Connect</text>
+  <text x="56" y="306" class="sub">Avro, LSN per change</text>
+
+  <rect x="240" y="236" width="160" height="92" class="box" style="fill:#fff7ed;stroke:#fdba74"/>
+  <text x="256" y="264" class="title">Kafka 3.7</text>
+  <text x="256" y="286" class="sub">KRaft, 5 topics</text>
+  <text x="256" y="306" class="sub">+ Apicurio (BACKWARD)</text>
+
+  <rect x="40" y="364" width="170" height="70" class="box" style="fill:#f1f5f9"/>
+  <text x="56" y="392" class="title">Simulator</text>
+  <text x="56" y="414" class="sub">Faker, up to 2K ev/s</text>
+
+  <!-- Lakehouse -->
+  <rect x="430" y="108" width="200" height="120" class="box" style="fill:#fdf4ff;stroke:#e9a8f5"/>
+  <text x="446" y="136" class="title">Bronze</text>
+  <text x="446" y="158" class="sub">raw bytes, append-only</text>
+  <text x="446" y="178" class="sub">topic/partition/offset</text>
+  <text x="446" y="198" class="sub">Delta txnVersion: exactly once</text>
+  <text x="446" y="218" class="sub">schema archive per run</text>
+
+  <rect x="430" y="264" width="200" height="150" class="box" style="fill:#fdf4ff;stroke:#e9a8f5"/>
+  <text x="446" y="292" class="title">Silver</text>
+  <text x="446" y="314" class="sub">decode, YAML DQ rules</text>
+  <text x="446" y="334" class="sub">dedupe per key</text>
+  <text x="446" y="354" class="sub">MERGE if (lsn, offset) newer</text>
+  <text x="446" y="374" class="sub">soft deletes, schema evolution</text>
+  <text x="446" y="394" class="sub">late events by LSN</text>
+
+  <rect x="660" y="264" width="170" height="70" class="box" style="fill:#fef2f2;stroke:#fca5a5"/>
+  <text x="676" y="292" class="title">Quarantine</text>
+  <text x="676" y="314" class="sub">bad rows + reasons</text>
+
+  <rect x="660" y="364" width="170" height="70" class="box" style="fill:#f1f5f9"/>
+  <text x="676" y="392" class="title">Backfill</text>
+  <text x="676" y="414" class="sub">horizon LSN, same MERGE</text>
+
+  <!-- Warehouse -->
+  <rect x="900" y="108" width="160" height="92" class="box" style="fill:#eff6ff;stroke:#93c5fd"/>
+  <text x="916" y="136" class="title">Postgres WH</text>
+  <text x="916" y="158" class="sub">dev &amp; CI</text>
+  <text x="916" y="178" class="sub">loaded by Delta version</text>
+
+  <rect x="1080" y="108" width="160" height="92" class="box" style="fill:#eff6ff;stroke:#93c5fd"/>
+  <text x="1096" y="136" class="title">Snowflake</text>
+  <text x="1096" y="158" class="sub">X-Small, benchmarks</text>
+  <text x="1096" y="178" class="sub">PUT/COPY + MERGE</text>
+
+  <rect x="900" y="236" width="340" height="110" class="box" style="fill:#ecfdf5;stroke:#86efac"/>
+  <text x="916" y="264" class="title">dbt</text>
+  <text x="916" y="286" class="sub">staging → SCD2 dim_customer → incremental facts</text>
+  <text x="916" y="306" class="sub">65 data tests · MetricFlow: GMV, AOV, refund rate</text>
+  <text x="916" y="326" class="sub">same project on Postgres and Snowflake</text>
+
+  <rect x="900" y="372" width="340" height="62" class="box" style="fill:#ecfdf5;stroke:#86efac"/>
+  <text x="916" y="398" class="title">Metabase</text>
+  <text x="916" y="420" class="sub">live ops dashboard, provisioned as code</text>
+
+  <!-- data flow edges -->
+  <path d="M125 200 L125 236" class="edge"/>
+  <text x="132" y="223" class="edgelabel">WAL</text>
+  <path d="M210 282 L240 282" class="edge"/>
+  <path d="M40 399 L24 399 L24 154 L38 154" class="soft"/>
+  <text x="28" y="350" class="edgelabel" transform="rotate(-90 28 350)">writes</text>
+  <path d="M400 270 C415 270, 410 168, 430 168" class="edge"/>
+  <text x="366" y="222" class="edgelabel">Spark</text>
+  <path d="M530 228 L530 264" class="edge"/>
+  <text x="537" y="251" class="edgelabel">stream</text>
+  <path d="M630 299 L660 299" class="edge"/>
+  <path d="M660 399 L632 399" class="edge"/>
+  <path d="M630 276 L646 276 L646 246 C770 246, 790 154, 898 154" class="edge"/>
+  <text x="700" y="236" class="edgelabel">Change Data Feed</text>
+  <path d="M1060 154 L1080 154" class="edge"/>
+  <path d="M980 200 L980 236" class="edge"/>
+  <path d="M1160 200 L1160 236" class="edge"/>
+  <path d="M1070 346 L1070 372" class="edge"/>
+
+  <!-- platform band -->
+  <text x="40" y="482" class="lane">PLATFORM</text>
+  <rect x="40" y="496" width="290" height="104" class="box"/>
+  <text x="56" y="524" class="title">Airflow</text>
+  <text x="56" y="546" class="sub">hourly dbt · backfill · nightly OPTIMIZE</text>
+  <text x="56" y="566" class="sub">+ VACUUM · daily DQ report</text>
+  <text x="56" y="586" class="sub">jobs as containers via socket proxy</text>
+
+  <rect x="350" y="496" width="290" height="104" class="box"/>
+  <text x="366" y="524" class="title">Prometheus + Grafana</text>
+  <text x="366" y="546" class="sub">lag, rows/s, p95 latency vs 60 s SLO</text>
+  <text x="366" y="566" class="sub">4 alerts → Slack/Discord webhook</text>
+  <text x="366" y="586" class="sub">dashboards and rules as code</text>
+
+  <rect x="660" y="496" width="270" height="104" class="box"/>
+  <text x="676" y="524" class="title">OpenLineage → Marquez</text>
+  <text x="676" y="546" class="sub">one graph: Kafka topic → fct_orders</text>
+  <text x="676" y="566" class="sub">Spark listener + dbt-ol + explicit events</text>
+  <text x="676" y="586" class="sub">25 datasets, 24 jobs</text>
+
+  <rect x="950" y="496" width="290" height="104" class="box" style="fill:#fefce8;stroke:#fde047"/>
+  <text x="966" y="524" class="title">Proof</text>
+  <text x="966" y="546" class="sub">6 chaos tests → 100% reconciliation</text>
+  <text x="966" y="566" class="sub">(row counts + SHA-256 of every row)</text>
+  <text x="966" y="586" class="sub">CI: 7 jobs incl. 1,000-event e2e test</text>
+</svg>
