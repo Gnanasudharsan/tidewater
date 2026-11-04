@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import logging
+import time
+
 from pyspark.sql import SparkSession
 
 from tidewater_spark.config import Settings
@@ -60,18 +63,47 @@ def build_spark(app_name: str, settings: Settings) -> SparkSession:
     return spark
 
 
-def delta_log_committed(spark: SparkSession, path: str) -> bool:
+def delta_log_committed(spark: SparkSession, path: str, fresh_fs: bool = False) -> bool:
     """True once a Delta table at `path` has at least one committed version.
 
     Checks the transaction log through the Hadoop FileSystem directly. In CI,
     `DeltaTable.isDeltaTable` kept returning False for minutes after bronze had
-    committed version 0 on SeaweedFS (cause not reproduced locally), so code that
-    waits for a table to appear waits for this concrete fact instead.
+    committed version 0. Delta wraps its `exists` call in Try(...).getOrElse(false),
+    so *any* error looks like "no table". Here only "not found" means "not yet";
+    every other error is logged, and `fresh_fs=True` bypasses Hadoop's per-JVM
+    FileSystem cache in case the cached S3A client is the broken part.
     """
     jvm = spark._jvm
-    log = jvm.org.apache.hadoop.fs.Path(path.rstrip("/") + "/_delta_log")
-    fs = log.getFileSystem(spark._jsc.hadoopConfiguration())
+    conf = spark._jsc.hadoopConfiguration()
+    log_dir = jvm.org.apache.hadoop.fs.Path(path.rstrip("/") + "/_delta_log")
+    fs = (
+        jvm.org.apache.hadoop.fs.FileSystem.newInstance(log_dir.toUri(), conf)
+        if fresh_fs
+        else log_dir.getFileSystem(conf)
+    )
     try:
-        return any(s.getPath().getName().endswith(".json") for s in fs.listStatus(log))
-    except Exception:  # noqa: BLE001 - FileNotFound and friends mean "not yet"
+        return any(s.getPath().getName().endswith(".json") for s in fs.listStatus(log_dir))
+    except Exception as exc:  # noqa: BLE001 - classified below
+        if "FileNotFoundException" not in str(exc):
+            logging.getLogger(__name__).warning(
+                "checking %s failed (not a 'not found'): %s", log_dir, str(exc).splitlines()[0]
+            )
         return False
+    finally:
+        if fresh_fs:
+            fs.close()
+
+
+def wait_for_delta_table(spark: SparkSession, path: str, poll_s: float = 10) -> None:
+    """Block until `path` has a committed Delta version, logging progress. After a
+    minute of waiting, each check also tries an uncached FileSystem client."""
+    waited, log = 0.0, logging.getLogger(__name__)
+    while True:
+        fresh = waited >= 60
+        if delta_log_committed(spark, path, fresh_fs=fresh):
+            if waited:
+                log.info("table at %s appeared after %.0fs (fresh client: %s)", path, waited, fresh)
+            return
+        log.info("waiting for Delta table at %s (%.0fs)", path, waited)
+        time.sleep(poll_s)
+        waited += poll_s

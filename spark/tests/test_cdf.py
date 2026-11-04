@@ -65,3 +65,27 @@ def test_delta_log_committed_waits_for_a_real_commit(spark, tmp_path):
         "overwrite"
     ).save(path)
     assert delta_log_committed(spark, path)
+
+
+def test_fresh_filesystem_client_sees_the_same_table(spark, tmp_path):
+    from tidewater_spark.session import delta_log_committed
+
+    path = str(tmp_path / "t")
+    spark.createDataFrame([(1, "a")], "id long, status string").write.format("delta").save(path)
+    assert delta_log_committed(spark, path, fresh_fs=True)
+
+
+def test_wait_returns_once_the_table_exists(spark, tmp_path):
+    import threading
+
+    from tidewater_spark.session import wait_for_delta_table
+
+    path = str(tmp_path / "late")
+
+    def create_later():
+        spark.createDataFrame([(1, "a")], "id long, status string").write.format("delta").save(path)
+
+    timer = threading.Timer(1.0, create_later)
+    timer.start()
+    wait_for_delta_table(spark, path, poll_s=0.5)  # must return, not hang
+    timer.join()
