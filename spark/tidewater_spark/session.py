@@ -99,10 +99,17 @@ def wait_for_delta_table(spark: SparkSession, path: str, poll_s: float = 10) -> 
     minute of waiting, each check also tries an uncached FileSystem client."""
     waited, log = 0.0, logging.getLogger(__name__)
     while True:
-        fresh = waited >= 60
-        if delta_log_committed(spark, path, fresh_fs=fresh):
+        cached = delta_log_committed(spark, path)
+        # Past a minute, also ask an uncached client in the same poll. Logging both
+        # answers tells a slow bronze (both False, then both True) apart from a stale
+        # cached client (cached False, fresh True): evidence for the CI stall.
+        fresh = delta_log_committed(spark, path, fresh_fs=True) if waited >= 60 else None
+        if cached or fresh:
             if waited:
-                log.info("table at %s appeared after %.0fs (fresh client: %s)", path, waited, fresh)
+                log.info(
+                    "table at %s appeared after %.0fs (cached client: %s, fresh client: %s)",
+                    path, waited, cached, fresh,
+                )  # fmt: skip
             return
         log.info("waiting for Delta table at %s (%.0fs)", path, waited)
         time.sleep(poll_s)
