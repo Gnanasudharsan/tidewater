@@ -19,9 +19,9 @@ Bugs hit, root causes, and fixes. Newest first.
   run 41576893536). Before it, the stall hit 2 of about 6 runs. Encouraging, but at
   that failure rate 4 straight passes still happen ~20% of the time by luck: keep
   watching CI before calling it closed.
-- **Follow-up (2026-11-04): 15 of 15 since the fix.** Two more batches of reruns
-  (6 on run 41901339036, 5 on run 41908053104) all passed. If the old 1-in-3 failure
-  rate were still there, 15 straight passes would happen about 0.2% of the time, so I
+- **Follow-up (2026-11-04): 16 of 16 since the fix.** Two more batches of reruns
+  (6 attempts each on runs 41901339036 and 41908053104) all passed. If the old 1-in-3 failure
+  rate were still there, 16 straight passes would happen about 0.15% of the time, so I
   now count the stall as fixed. The new logging also tested my second theory, that
   Hadoop's cached S3A client was returning stale listings. It didn't hold: silver
   saw the table after 40–60 s in every run (bronze's first commit really does take
