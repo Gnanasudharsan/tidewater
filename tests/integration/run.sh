@@ -56,4 +56,8 @@ m=$(wh "select coalesce(sum(gmv), 0) from marts.fct_daily_sales")
 printf '  %-12s source=%-12s marts=%s\n' "gmv" "$s" "$m"
 [ "$s" = "$m" ] || fail=1
 
+log "Silver's wait for bronze (evidence for the intermittent CI stall)"
+$COMPOSE logs spark-silver 2>&1 | grep -E "waiting for Delta table|appeared after|failed \(not a 'not found'\)" |
+  sed 's/^.*INFO //; s/^.*WARNING /WARNING /' | sed -n '1p;$p' || true
+
 [ "$fail" = 0 ] && log "PASS: $EVENTS events landed correctly in the marts" || { log "FAIL"; exit 1; }
