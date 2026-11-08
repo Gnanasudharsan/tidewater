@@ -1,0 +1,172 @@
+name: showcase
+
+# Runs the real pipeline end to end, publishes what it measured, and deploys the
+# showcase site (site/) plus the dbt docs (site/catalog/) to GitHub Pages.
+# Every number on the site comes from results/latest.json written by this workflow
+# or from result files committed in the repo; nothing is typed in by hand.
+#
+# Scheduled workflows are disabled after 60 days without repository activity; the
+# README explains how to re-enable the nightly run.
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 6 * * *" # nightly, 06:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Runs queue instead of overlapping, so history.json appends never race.
+concurrency:
+  group: showcase
+  cancel-in-progress: false
+
+env:
+  EVENTS: "1000"
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v5
+      - run: cp .env.example .env && mkdir -p results/raw/chaos
+
+      - name: "Merge parity: site/js/merge.js vs the PySpark merge on Delta"
+        run: |
+          set +e
+          make parity 2>&1 | tail -20
+          echo "${PIPESTATUS[0]}" > results/raw/parity.exit
+
+      - name: Start the core stack and the warehouse
+        id: up
+        run: |
+          docker compose --profile core up -d --wait --build
+          docker compose --profile wh up -d --wait postgres-wh
+          ./scripts/register_connector.sh
+
+      - name: End-to-end test (simulator -> CDC -> bronze -> silver -> reconcile -> dbt marts)
+        run: |
+          set +e
+          ./tests/integration/run.sh 2>&1 | tee results/raw/integration.log
+          echo "${PIPESTATUS[0]}" > results/raw/integration.exit
+          cp /tmp/reconcile.out results/raw/reconcile.out
+          docker compose logs --no-color spark-silver > results/raw/silver.log 2>&1
+          exit 0
+
+      - name: Chaos tests (the CI-safe subset)
+        run: |
+          set +e
+          for t in 01_kill_bronze_mid_batch 04_malformed_events; do
+            start=$SECONDS
+            "./tests/chaos/$t.sh" > "results/raw/chaos/$t.log" 2>&1
+            echo $? > "results/raw/chaos/$t.exit"
+            echo $((SECONDS - start)) > "results/raw/chaos/$t.seconds"
+            echo "== $t: exit $(cat results/raw/chaos/$t.exit)"; tail -3 "results/raw/chaos/$t.log"
+          done
+          exit 0
+
+      - name: Emit results/latest.json
+        if: always()
+        run: python3 scripts/emit_results.py --raw results/raw --events "$EVENTS" --out results/latest.json
+
+      - name: Keep container logs with the results
+        if: always()
+        run: docker compose --profile all --profile sim logs --no-color > results/raw/compose.log 2>&1 || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: showcase-results
+          path: results/
+          retention-days: 30
+
+      - name: Tear down
+        if: always()
+        run: docker compose --profile all --profile sim down -v --remove-orphans
+
+      - name: Fail the job if the run failed
+        if: always()
+        run: python3 -c "import json, sys; sys.exit(json.load(open('results/latest.json'))['status'] != 'passed')"
+
+  build-site:
+    needs: verify
+    # A failed run is still published: the site shows it as failed.
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # history.json lives on the showcase-data branch
+    services:
+      # dbt docs generate needs a connection for introspection; an empty warehouse is enough.
+      postgres:
+        image: postgres:16.4
+        env:
+          POSTGRES_USER: warehouse
+          POSTGRES_PASSWORD: warehouse
+          POSTGRES_DB: analytics
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U warehouse" --health-interval 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v4
+        with:
+          name: showcase-results
+          path: results
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: dbt docs -> site/catalog/
+        working-directory: dbt
+        env:
+          DBT_PROFILES_DIR: .
+          WH_PGHOST: localhost
+          WH_PGPORT: "5432"
+        run: |
+          pip install -q dbt-core==1.8.9 dbt-postgres==1.8.2
+          dbt deps
+          dbt docs generate
+          mkdir -p ../site/catalog
+          cp target/index.html target/manifest.json target/catalog.json ../site/catalog/
+
+      - name: Results tables from committed result files -> site/data/results.json
+        run: python3 scripts/build_site_data.py --out site/data/results.json
+
+      - name: Latest run and history (last 30 runs, kept on the showcase-data branch)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp results/latest.json site/data/latest.json
+          remote="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          data="$RUNNER_TEMP/showcase-data"
+          if ! git clone -q --depth 1 --branch showcase-data "$remote" "$data" 2>/dev/null; then
+            git init -q -b showcase-data "$data" && git -C "$data" remote add origin "$remote"
+          fi
+          python3 scripts/build_site_data.py --append-history "$data/history.json" --latest results/latest.json
+          cp "$data/history.json" site/data/history.json
+          cd "$data"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add history.json
+          git commit -q -m "data: showcase run ${GITHUB_RUN_ID} ($(python3 -c "import json; print(json.load(open('$GITHUB_WORKSPACE/results/latest.json'))['status'])"))"
+          git push -q origin showcase-data
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build-site
+    if: ${{ !cancelled() && needs.build-site.result == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

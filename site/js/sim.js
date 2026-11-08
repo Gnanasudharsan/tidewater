@@ -320,12 +320,9 @@
     renderSilver();
     if (msg) $("sim-status").textContent = msg;
     $("lag-note").hidden = S.pending.length === 0;
-    try {
-      history.replaceState(null, "", "#seed=" + S.seed + "&a=" + S.actions.join("."));
-    } catch (_) {
-      /* file:// or sandboxed: sharing just won't update the URL */
-    }
   }
+
+  const shareUrl = () => location.href.split("#")[0] + "#seed=" + S.seed + "&a=" + S.actions.join(".");
 
   // ---------- trace drawer ----------
   const OUTCOME = {
@@ -396,7 +393,10 @@
     if (!Merge || !$("sim")) return;
     const shared = parseHash();
     start(shared ? shared.seed : (Math.random() * 2 ** 32) >>> 0, shared ? shared.actions : INTRO);
-    if (shared) $("sim-status").textContent = "Replayed a shared scenario (" + shared.actions.length + " actions).";
+    if (shared) {
+      $("sim-status").textContent = "Replayed a shared scenario (" + shared.actions.length + " actions).";
+      $("try").scrollIntoView();
+    }
 
     $("sim").addEventListener("click", (ev) => {
       const b = ev.target.closest("button");
@@ -417,9 +417,16 @@
       start(S.seed, INTRO);
     };
     $("btn-share").onclick = () => {
+      const url = shareUrl();
+      try {
+        history.replaceState(null, "", url);
+      } catch (_) {
+        /* sandboxed: the copied link still works */
+      }
       const done = () => ($("sim-status").textContent = "Link to this exact scenario copied.");
-      if (navigator.clipboard) navigator.clipboard.writeText(location.href).then(done, () => ($("sim-status").textContent = "Copy this page's URL to share the scenario."));
-      else $("sim-status").textContent = "Copy this page's URL to share the scenario.";
+      const manual = () => ($("sim-status").textContent = "Copy the address bar to share this scenario.");
+      if (navigator.clipboard) navigator.clipboard.writeText(url).then(done, manual);
+      else manual();
     };
     $("trace-close").onclick = () => $("trace").close();
     $("trace").addEventListener("click", (ev) => ev.target === $("trace") && $("trace").close());

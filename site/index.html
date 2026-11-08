@@ -16,6 +16,7 @@
       <a class="brand" href="#top">Tidewater</a>
       <ul>
         <li><a href="#try">Try to break it</a></li>
+        <li><a href="#proof">Live proof</a></li>
         <li><a href="https://github.com/Gnanasudharsan/tidewater">GitHub</a></li>
       </ul>
     </nav>
@@ -40,7 +41,7 @@
           <g class="node"><rect x="132" y="44" width="108" height="66" rx="9"/><text x="186" y="72">Debezium</text><text x="186" y="92" class="s">pgoutput slot</text></g>
           <g class="node"><rect x="256" y="44" width="108" height="66" rx="9"/><text x="310" y="72">Kafka</text><text x="310" y="92" class="s">Avro · registry</text></g>
           <g class="node"><rect x="380" y="44" width="108" height="66" rx="9"/><text x="434" y="72">Bronze</text><text x="434" y="92" class="s">raw, append</text></g>
-          <g class="node key"><rect x="504" y="44" width="108" height="66" rx="9"/><text x="558" y="72">Silver</text><text x="558" y="92" class="s">LSN-guarded MERGE</text></g>
+          <g class="node key"><rect x="504" y="44" width="108" height="66" rx="9"/><text x="558" y="72">Silver</text><text x="558" y="92" class="s">MERGE by LSN</text></g>
           <g class="node"><rect x="628" y="44" width="108" height="66" rx="9"/><text x="682" y="72">Warehouse</text><text x="682" y="92" class="s">Postgres/Snowflake</text></g>
           <g class="node"><rect x="752" y="44" width="108" height="66" rx="9"/><text x="806" y="72">dbt</text><text x="806" y="92" class="s">marts · SCD2</text></g>
           <g class="node"><rect x="876" y="44" width="108" height="66" rx="9"/><text x="930" y="72">Metabase</text><text x="930" y="92" class="s">dashboards</text></g>
@@ -69,6 +70,7 @@
         <h2 id="try-title">Try to break it</h2>
         <p class="section-lede">Change the source table, then attack the delivery: redeliver events, shuffle them, kill Spark mid-batch, replay everything. Both sinks get exactly the same deliveries. The naive sink applies them in arrival order; Tidewater applies each micro-batch with the production MERGE rule.</p>
         <p class="honest"><strong>This is a simulation</strong> running in your browser, not the live pipeline. It uses the same merge rule as the real Spark job, ported to <a href="https://github.com/Gnanasudharsan/tidewater/blob/main/site/js/merge.js"><code>merge.js</code></a>.</p>
+        <p id="parity-note" class="parity"></p>
 
         <div id="sim" class="sim">
           <div class="toolbar" role="toolbar" aria-label="Simulator controls">
@@ -132,6 +134,16 @@
         </dialog>
       </div>
     </section>
+
+    <section id="proof" class="band" aria-labelledby="proof-title">
+      <div class="wrap">
+        <h2 id="proof-title">Live proof from CI</h2>
+        <p class="section-lede">Not a simulation. On every push and every night, <a href="https://github.com/Gnanasudharsan/tidewater/blob/main/.github/workflows/showcase.yml">the showcase workflow</a> starts the real stack (Postgres, Debezium, Kafka, Spark, Delta Lake), pushes events through to the dbt marts, kills components, reconciles silver against the source row by row, and publishes what it measured here.</p>
+        <dl id="proof-cards" class="cards" aria-live="polite"></dl>
+        <h3 class="chart-title">Last 30 runs</h3>
+        <div id="trend" class="trend"></div>
+      </div>
+    </section>
   </main>
 
   <footer class="footer">
@@ -150,5 +162,6 @@
 
   <script src="js/merge.js"></script>
   <script src="js/sim.js"></script>
+  <script src="js/proof.js"></script>
 </body>
 </html>

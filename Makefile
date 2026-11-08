@@ -9,7 +9,7 @@ DURATION ?= 0
 
 .DEFAULT_GOAL := help
 .PHONY: help init up-core up-wh up-all down nuke ps logs register sim sim-burst \
-        psql-src psql-wh topics test test-spark verify-bronze chaos-bronze backfill reconcile soak load-wh dbt dbt-build dbt-freshness metrics dashboard maintenance up-orch airflow-password test-airflow tf-plan tf-apply integration up-obs chaos up-lineage audit-trace demo bench sf-keypair sf-plan sf-apply load-sf dbt-sf lint fmt pre-commit
+        psql-src psql-wh topics test test-spark parity verify-bronze chaos-bronze backfill reconcile soak load-wh dbt dbt-build dbt-freshness metrics dashboard maintenance up-orch airflow-password test-airflow tf-plan tf-apply integration up-obs chaos up-lineage audit-trace demo bench sf-keypair sf-plan sf-apply load-sf dbt-sf lint fmt pre-commit
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-12s\033[0m %s\n",$$1,$$2}'

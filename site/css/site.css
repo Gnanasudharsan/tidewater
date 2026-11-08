@@ -118,9 +118,8 @@ select { background: var(--surface); border: 1px solid var(--border); border-rad
 
 /* ---------- simulator ---------- */
 .sim { margin-top: 20px; }
-.toolbar { display: flex; flex-wrap: wrap; gap: 12px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; box-shadow: var(--shadow); }
-.group { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding-right: 12px; border-right: 1px solid var(--border); }
-.group:last-child { border-right: 0; padding-right: 0; }
+.toolbar { display: flex; flex-wrap: wrap; gap: 8px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; box-shadow: var(--shadow); }
+.group { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; flex: 1 1 auto; padding: 8px 10px 10px; border-radius: 10px; background: var(--surface-2); }
 .glabel { font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); width: 100%; }
 .dup-ctl { display: inline-flex; gap: 4px; }
 .status-line { min-height: 1.6em; margin: 12px 2px 4px; font-size: 0.95rem; }
@@ -128,7 +127,7 @@ select { background: var(--surface); border: 1px solid var(--border); border-rad
 .lag-note { margin: 4px 2px 0; padding: 8px 12px; border-radius: 8px; background: var(--warn-soft); color: var(--text); font-size: 0.9rem; }
 
 .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-top: 12px; }
-@media (max-width: 860px) { .grid { grid-template-columns: minmax(0, 1fr); } .group { border-right: 0; padding-right: 0; } }
+@media (max-width: 860px) { .grid { grid-template-columns: minmax(0, 1fr); } }
 .panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); display: flex; flex-direction: column; min-width: 0; }
 .panel > header { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; padding: 12px 14px 8px; flex-wrap: wrap; }
 .panel > header h3 { margin: 0; }
@@ -189,3 +188,30 @@ dialog::backdrop { background: rgb(5 10 20 / 55%); }
 /* ---------- footer ---------- */
 .footer { border-top: 1px solid var(--border); padding: 28px 0 40px; font-size: 0.92rem; }
 .links { display: flex; flex-wrap: wrap; gap: 8px 18px; list-style: none; padding: 0; margin: 0 0 8px; }
+
+/* ---------- live proof ---------- */
+.parity { font-size: 0.92rem; color: var(--muted); max-width: 75ch; }
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; margin: 20px 0 8px; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; box-shadow: var(--shadow); min-width: 0; }
+.card dt { font-size: 0.74rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: 700; }
+.card dd { margin: 4px 0 0; font-size: 1.45rem; font-weight: 800; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.card .sub { margin: 4px 0 0; font-size: 0.82rem; color: var(--muted); }
+.na { font-size: 0.95rem; font-weight: 600; color: var(--muted); }
+.chart-title { margin-top: 28px; }
+.trend { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; box-shadow: var(--shadow); }
+.trend svg { display: block; width: 100%; height: auto; }
+.trend .tick line { stroke: var(--border); }
+.trend .tick text, .trend .axis { font: 11px var(--sans); fill: var(--muted); text-anchor: end; }
+.trend .axis { text-anchor: start; }
+.trend .axis.end { text-anchor: end; }
+.trend .l95 { fill: none; stroke: var(--accent); stroke-width: 2.2; }
+.trend .l50 { fill: none; stroke: var(--muted); stroke-width: 1.6; stroke-dasharray: 5 4; }
+.trend .d95 { fill: var(--accent); }
+.trend .pass { fill: var(--ok); }
+.trend .fail { fill: var(--bad); }
+.legend { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; font-size: 0.85rem; color: var(--muted); margin: 8px 0; }
+.legend span { display: inline-block; width: 14px; height: 4px; border-radius: 2px; margin-right: -8px; }
+.legend .k95 { background: var(--accent); } .legend .k50 { background: var(--muted); }
+.legend .kpass, .legend .kfail { height: 10px; width: 10px; }
+.legend .kpass { background: var(--ok); } .legend .kfail { background: var(--bad); }
+details summary { cursor: pointer; color: var(--accent); font-size: 0.9rem; padding: 6px 0; }
