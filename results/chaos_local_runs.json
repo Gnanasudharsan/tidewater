@@ -1,0 +1,55 @@
+{
+  "about": "Outcomes of the full chaos suite run locally (Docker on a laptop). Copied from the README's chaos table, which links each test; the dev log records what each run found. CI re-runs 01 and 04 on every showcase run (see results/latest.json).",
+  "source": "README.md#chaos-suite",
+  "devlog": "docs/devlog.md",
+  "runs": [
+    {
+      "id": "01",
+      "script": "tests/chaos/01_kill_bronze_mid_batch.sh",
+      "broken": "SIGKILL bronze mid-batch x3, plus a crash right after the Delta commit",
+      "result": "PASS",
+      "recovery": "Replay skipped by Delta txnVersion; every Kafka offset in bronze exactly once",
+      "runbook": "docs/runbooks/spark-killed-mid-batch.md"
+    },
+    {
+      "id": "02",
+      "script": "tests/chaos/02_debezium_outage.sh",
+      "broken": "Debezium (Kafka Connect) down while the source keeps changing (ran 180 s; default 600 s)",
+      "result": "PASS",
+      "recovery": "Replication slot retained the WAL; CDC resumed and silver reconciled 100%",
+      "runbook": "docs/runbooks/debezium-outage.md"
+    },
+    {
+      "id": "03",
+      "script": "tests/chaos/03_add_column_live.sh",
+      "broken": "ADD COLUMN ... DEFAULT on a live source table",
+      "result": "PASS",
+      "recovery": "Found that metadata-only DDL emits no CDC for existing rows; the procedure is ALTER + backfill",
+      "runbook": "docs/runbooks/schema-change.md"
+    },
+    {
+      "id": "04",
+      "script": "tests/chaos/04_malformed_events.sh",
+      "broken": "Malformed Kafka records plus a row that violates a DQ rule",
+      "result": "PASS",
+      "recovery": "Each record quarantined with its exact reason; streams never stopped",
+      "runbook": "docs/runbooks/malformed-events.md"
+    },
+    {
+      "id": "05",
+      "script": "tests/chaos/05_rebuild_silver_from_bronze.sh",
+      "broken": "Every silver table dropped, rebuilt from bronze alone",
+      "result": "PASS",
+      "recovery": "Needed the bronze schema archive and a delete-repair backfill; reconciled 100%",
+      "runbook": "docs/runbooks/rebuild-silver.md"
+    },
+    {
+      "id": "06",
+      "script": "tests/chaos/06_concurrent_backfill.sh",
+      "broken": "Full backfill (341k rows) during live CDC",
+      "result": "PASS",
+      "recovery": "Unpartitioned MERGE targets conflicted on every commit; fixed with a retry budget and pacing; reconciled 100%",
+      "runbook": "docs/runbooks/concurrent-backfill.md"
+    }
+  ]
+}

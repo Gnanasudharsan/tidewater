@@ -39,3 +39,6 @@ terraform/**/*.tfvars
 tests/parity/out/
 site/data/
 site/catalog/
+site/media/
+results/latest.json
+results/raw/
