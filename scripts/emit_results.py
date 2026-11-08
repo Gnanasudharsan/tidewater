@@ -3,12 +3,17 @@
 Every number comes from an artifact of the run; anything the run did not produce is
 null (the site shows "not measured"), never a guess or a zero.
 
-  reconcile output  -> rows_reconciled, duplicates_in_silver, hash_match_pct
-  silver stream log -> latency_ms (p50: median of per-batch p50s; p95: worst per-batch p95)
+  reconcile output  -> rows_reconciled, duplicates_in_silver, hash_match_pct (the warm
+                       wave's reconcile when it ran, since it covers every event)
+  silver stream log -> latency (p50: median of per-batch p50s; p95: worst per-batch p95)
+                       latency_ms: the warm wave, sent once the stream is running
+                       latency_cold_ms: the end-to-end test, whose first batch waits for
+                       the stream to start
   chaos/<name>.exit -> chaos[] (exit code 0 = passed; the log's last PASS/FAIL line = notes)
   exit codes        -> status ("passed" only if integration, every chaos test and parity pass)
 
-    python3 scripts/emit_results.py --raw results/raw --events 1000 --out results/latest.json
+    python3 scripts/emit_results.py --raw results/raw --events 1000 --warm-events 600 \
+        --out results/latest.json
 """
 
 from __future__ import annotations
@@ -102,6 +107,7 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--raw", type=Path, default=Path("results/raw"))
     ap.add_argument("--events", type=int, required=True, help="business events the simulator sent")
+    ap.add_argument("--warm-events", type=int, default=0, help="events in the warm wave")
     ap.add_argument("--out", type=Path, default=Path("results/latest.json"))
     args = ap.parse_args()
     raw = args.raw
@@ -109,7 +115,18 @@ def main() -> None:
     integration = exit_code(raw / "integration.exit")
     parity = exit_code(raw / "parity.exit")
     chaos = parse_chaos(raw / "chaos")
-    passed = integration == 0 and parity == 0 and all(c["passed"] for c in chaos)
+    warm_text = read(raw / "reconcile_warm.out")
+    warm = parse_reconcile(warm_text)
+    warm_ran, warm_ok = warm_text is not None, warm["rows_reconciled"] is not None
+    passed = (
+        integration == 0
+        and parity == 0
+        and all(c["passed"] for c in chaos)
+        and (warm_ok or not warm_ran)
+    )
+    events = None
+    if integration == 0:
+        events = args.events + (args.warm_events if warm_ok else 0)
 
     server, repo, run = (
         os.environ.get(k, "") for k in ("GITHUB_SERVER_URL", "GITHUB_REPOSITORY", "GITHUB_RUN_ID")
@@ -120,11 +137,13 @@ def main() -> None:
         "commit_sha": os.environ.get("GITHUB_SHA", ""),
         "timestamp_utc": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         # Only count events as processed if they made it through end to end.
-        "events_processed": args.events if integration == 0 else None,
-        **parse_reconcile(read(raw / "reconcile.out")),
-        "latency_ms": parse_latency(read(raw / "silver.log")),
+        "events_processed": events,
+        **(warm if warm_ok else parse_reconcile(read(raw / "reconcile.out"))),
+        "latency_ms": parse_latency(read(raw / "silver_warm.log")),
+        "latency_cold_ms": parse_latency(read(raw / "silver.log")),
         "chaos": chaos,
         "integration_passed": integration == 0,
+        "warm_reconcile_passed": warm_ok if warm_ran else None,
         "parity_passed": None if parity is None else parity == 0,
     }
     args.out.parent.mkdir(parents=True, exist_ok=True)

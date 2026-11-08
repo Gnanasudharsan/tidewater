@@ -23,7 +23,8 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  EVENTS: "1000"
+  EVENTS: "1000"      # end-to-end test (the stream starts cold)
+  WARM_EVENTS: "600"  # second wave into the running stream, for steady-state latency
 
 jobs:
   verify:
@@ -55,6 +56,30 @@ jobs:
           docker compose logs --no-color spark-silver > results/raw/silver.log 2>&1
           exit 0
 
+      - name: dbt docs against the loaded warehouse (so the catalog has column types)
+        run: |
+          set +e
+          docker compose --profile wh run --rm dbt docs generate > results/raw/dbt_docs.log 2>&1
+          mkdir -p results/catalog
+          cp dbt/target/index.html dbt/target/manifest.json dbt/target/catalog.json results/catalog/ &&
+            echo "catalog.json: $(wc -c < results/catalog/catalog.json) bytes"
+          exit 0
+
+      - name: Warm-stream latency (a second wave once the stream is running)
+        run: |
+          set +e
+          start=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          docker compose --profile sim run --rm simulator --rate 20 --events "$WARM_EVENTS" --random-seed 11 2>&1 | tail -1
+          for attempt in $(seq 1 12); do
+            sleep 15
+            docker compose run --rm --no-deps spark-bronze /opt/spark/bin/spark-submit --master 'local[2]' \
+              --driver-memory 1g jobs/reconcile.py > results/raw/reconcile_warm.out 2>/dev/null && break
+          done
+          grep "^RESULT" results/raw/reconcile_warm.out
+          docker compose logs --no-color --since "$start" spark-silver > results/raw/silver_warm.log 2>&1
+          echo "silver batches with latency: $(grep -c latency_p95_s results/raw/silver_warm.log)"
+          exit 0
+
       - name: Chaos tests (the CI-safe subset)
         run: |
           set +e
@@ -69,7 +94,9 @@ jobs:
 
       - name: Emit results/latest.json
         if: always()
-        run: python3 scripts/emit_results.py --raw results/raw --events "$EVENTS" --out results/latest.json
+        run: >
+          python3 scripts/emit_results.py --raw results/raw --events "$EVENTS"
+          --warm-events "$WARM_EVENTS" --out results/latest.json
 
       - name: Keep container logs with the results
         if: always()
@@ -118,7 +145,14 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: dbt docs -> site/catalog/
+      - name: dbt docs -> site/catalog/ (from the verify run's loaded warehouse)
+        run: |
+          mkdir -p site/catalog
+          cp results/catalog/index.html results/catalog/manifest.json results/catalog/catalog.json site/catalog/ 2>/dev/null &&
+            echo "catalog from the verify run" || echo "no catalog from the verify run; generating one without data"
+
+      - name: Fallback dbt docs against an empty warehouse (descriptions and lineage, no column types)
+        if: hashFiles('site/catalog/index.html') == ''
         working-directory: dbt
         env:
           DBT_PROFILES_DIR: .
@@ -128,7 +162,6 @@ jobs:
           pip install -q dbt-core==1.8.9 dbt-postgres==1.8.2
           dbt deps
           dbt docs generate
-          mkdir -p ../site/catalog
           cp target/index.html target/manifest.json target/catalog.json ../site/catalog/
 
       - name: Results tables from committed result files -> site/data/results.json

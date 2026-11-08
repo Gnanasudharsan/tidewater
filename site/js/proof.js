@@ -79,6 +79,7 @@
       return;
     }
     const lat = latest.latency_ms;
+    const cold = latest.latency_cold_ms;
     const chaos = latest.chaos || [];
     const okChaos = chaos.filter((c) => c.passed).length;
     const pct = num(latest.hash_match_pct);
@@ -87,7 +88,13 @@
       card("Rows reconciled", fmtInt(latest.rows_reconciled), "silver vs source, every table"),
       card("Duplicates in silver", fmtInt(latest.duplicates_in_silver), "expected: 0"),
       card("Row hash match", pct === null ? NA : pct.toFixed(pct === 100 ? 0 : 3) + "%", "SHA-256 of every column of every row"),
-      card("Latency p50 / p95", lat ? `${fmtSec(lat.p50)} / ${fmtSec(lat.p95)}` : NA, lat ? `source commit → silver commit; median p50, worst p95 over ${lat.batches} micro-batches` : "source commit → silver commit"),
+      card(
+        "Latency p50 / p95, warm",
+        lat ? `${fmtSec(lat.p50)} / ${fmtSec(lat.p95)}` : NA,
+        "source commit → silver commit for a second wave into the running stream" +
+          (lat ? `; median p50, worst p95 over ${lat.batches} micro-batch${lat.batches === 1 ? "" : "es"}` : "") +
+          (cold ? `. Cold start (first batch waits for the stream): p95 ${fmtSec(cold.p95)}` : "")
+      ),
       card("Chaos tests", chaos.length ? `${okChaos} / ${chaos.length} passed` : NA, chaos.map((c) => `${c.passed ? "✅" : "❌"} ${esc(c.name.replace(/_/g, " "))}`).join("<br>")),
       card("Commit", latest.commit_sha ? `<a href="${REPO}/commit/${esc(latest.commit_sha)}"><code>${esc(latest.commit_sha.slice(0, 7))}</code></a>` : NA),
       card("Run time", `<time datetime="${esc(latest.timestamp_utc)}">${esc(latest.timestamp_utc.replace("T", " ").replace("Z", " UTC"))}</time>`, latest.run_url ? `<a href="${esc(latest.run_url)}">View this CI run</a>` : ""),
@@ -104,7 +111,10 @@
       return;
     }
     const W = 600, H = 250, L = 48, R = 14, T = 16, B = 58;
-    const pts = runs.map((r, i) => ({ i, r, p50: r.latency_ms ? r.latency_ms.p50 / 1000 : null, p95: r.latency_ms ? r.latency_ms.p95 / 1000 : null }));
+    // Runs published before the warm wave existed (no latency_cold_ms) only measured a
+    // cold start; leave their latency out so the line compares like with like.
+    const warm = (r) => (r.latency_ms && "latency_cold_ms" in r ? r.latency_ms : null);
+    const pts = runs.map((r, i) => ({ i, r, p50: warm(r) ? warm(r).p50 / 1000 : null, p95: warm(r) ? warm(r).p95 / 1000 : null }));
     const maxY = Math.max(10, ...pts.map((p) => p.p95 || 0));
     const niceMax = Math.ceil(maxY / 10) * 10;
     const x = (i) => L + (runs.length === 1 ? 0 : (i * (W - L - R)) / (runs.length - 1));
@@ -117,7 +127,7 @@
     const ticks = [0, 0.25, 0.5, 0.75, 1].map((f) => f * niceMax);
     const passed = runs.filter((r) => r.status === "passed").length;
     el.innerHTML =
-      `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Latency of the last ${runs.length} verified runs; ${passed} of ${runs.length} passed. Data table below.">` +
+      `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Warm-stream latency of the last ${runs.length} verified runs; ${passed} of ${runs.length} passed. Data table below.">` +
       ticks.map((t) => `<g class="tick"><line x1="${L}" x2="${W - R}" y1="${y(t)}" y2="${y(t)}"/><text x="${L - 8}" y="${y(t) + 4}">${t}s</text></g>`).join("") +
       `<path class="l95" d="${line("p95")}"/><path class="l50" d="${line("p50")}"/>` +
       pts.map((p) => (p.p95 === null ? "" : `<circle class="d95" cx="${x(p.i)}" cy="${y(p.p95)}" r="3.5"><title>${esc(p.r.timestamp_utc)}: p95 ${p.p95.toFixed(1)} s</title></circle>`)).join("") +
@@ -125,12 +135,12 @@
       `<text class="axis" x="${L}" y="${H - 6}">older</text><text class="axis end" x="${W - R}" y="${H - 6}">latest</text>` +
       `<text class="axis" x="${L}" y="${H - B + 12}">pass / fail</text>` +
       `</svg>` +
-      `<p class="legend"><span class="k95"></span> p95 latency <span class="k50"></span> p50 latency <span class="kpass"></span> passed <span class="kfail"></span> failed</p>` +
+      `<p class="legend"><span class="k95"></span> p95 latency (warm) <span class="k50"></span> p50 latency (warm) <span class="kpass"></span> passed <span class="kfail"></span> failed</p>` +
       `<details><summary>Show the data table</summary><div class="scroll"><table><thead><tr><th scope="col">Run (UTC)</th><th scope="col">Status</th><th scope="col" class="num">p50</th><th scope="col" class="num">p95</th><th scope="col">Commit</th></tr></thead><tbody>` +
       runs
         .slice()
         .reverse()
-        .map((r) => `<tr><td>${r.run_url ? `<a href="${esc(r.run_url)}">${esc(r.timestamp_utc)}</a>` : esc(r.timestamp_utc)}</td><td>${esc(r.status)}</td><td class="num">${fmtSec(r.latency_ms && r.latency_ms.p50) || "n/a"}</td><td class="num">${fmtSec(r.latency_ms && r.latency_ms.p95) || "n/a"}</td><td><code>${esc((r.commit_sha || "").slice(0, 7))}</code></td></tr>`)
+        .map((r) => `<tr><td>${r.run_url ? `<a href="${esc(r.run_url)}">${esc(r.timestamp_utc)}</a>` : esc(r.timestamp_utc)}</td><td>${esc(r.status)}</td><td class="num">${fmtSec(warm(r) && warm(r).p50) || "n/a"}</td><td class="num">${fmtSec(warm(r) && warm(r).p95) || "n/a"}</td><td><code>${esc((r.commit_sha || "").slice(0, 7))}</code></td></tr>`)
         .join("") +
       `</tbody></table></div></details>`;
   }

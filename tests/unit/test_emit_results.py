@@ -69,7 +69,8 @@ def test_end_to_end_failed_run_keeps_nulls(tmp_path, monkeypatch):
     r = json.loads(out.read_text())
     assert r["status"] == "failed"
     assert r["events_processed"] is None and r["rows_reconciled"] is None
-    assert r["latency_ms"] is None
+    assert r["latency_ms"] is None and r["latency_cold_ms"] is None
+    assert r["warm_reconcile_passed"] is None
     assert r["chaos"] == [
         {
             "name": "01_kill_bronze_mid_batch",
@@ -78,3 +79,35 @@ def test_end_to_end_failed_run_keeps_nulls(tmp_path, monkeypatch):
             "seconds": None,
         }
     ]
+
+
+def run_emit(tmp_path, monkeypatch, warm_reconcile):
+    raw = tmp_path / "raw"
+    (raw / "chaos").mkdir(parents=True)
+    (raw / "integration.exit").write_text("0")
+    (raw / "parity.exit").write_text("0")
+    (raw / "reconcile.out").write_text(RECONCILE_PASS)
+    (raw / "silver.log").write_text(SILVER_LOG)
+    (raw / "reconcile_warm.out").write_text(warm_reconcile)
+    (raw / "silver_warm.log").write_text(
+        batch_line({"batch": 9, "latency_p95_s": 18.2, "latency_p50_s": 11.0})
+    )
+    out = tmp_path / "latest.json"
+    argv = ["x", "--raw", str(raw), "--events", "1000", "--warm-events", "600", "--out", str(out)]
+    monkeypatch.setattr(sys, "argv", argv)
+    emit.main()
+    return json.loads(out.read_text())
+
+
+def test_warm_wave_gives_headline_latency_and_totals(tmp_path, monkeypatch):
+    r = run_emit(tmp_path, monkeypatch, RECONCILE_PASS.replace("400      400", "700      700"))
+    assert r["status"] == "passed"
+    assert r["latency_ms"] == {"p50": 11000, "p95": 18200, "batches": 1}
+    assert r["latency_cold_ms"] == {"p50": 9000, "p95": 61500, "batches": 3}
+    assert r["events_processed"] == 1600 and r["rows_reconciled"] == 1200
+
+
+def test_failed_warm_reconcile_fails_the_run(tmp_path, monkeypatch):
+    r = run_emit(tmp_path, monkeypatch, RECONCILE_PASS.replace("RESULT: PASS", "RESULT: FAIL"))
+    assert r["status"] == "failed" and r["warm_reconcile_passed"] is False
+    assert r["events_processed"] == 1000 and r["rows_reconciled"] == 900
