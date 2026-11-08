@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tidewater CDC Lakehouse</title>
+  <meta name="description" content="Tidewater turns at-least-once Kafka delivery into exactly-once results. Break it yourself in the browser, then check the latest verified CI run.">
+  <meta name="color-scheme" content="light dark">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230e7490'/%3E%3Cpath d='M4 19c4-4 8 4 12 0s8 4 12 0v7H4z' fill='%23e0f2fe'/%3E%3Cpath d='M4 13c4-4 8 4 12 0s8 4 12 0' stroke='%23e0f2fe' stroke-width='2.5' fill='none'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="css/site.css">
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <header class="topbar">
+    <nav class="wrap nav" aria-label="Sections">
+      <a class="brand" href="#top">Tidewater</a>
+      <ul>
+        <li><a href="#try">Try to break it</a></li>
+        <li><a href="https://github.com/Gnanasudharsan/tidewater">GitHub</a></li>
+      </ul>
+    </nav>
+  </header>
+
+  <main id="main">
+    <section id="top" class="hero wrap" aria-labelledby="hero-title">
+      <p class="eyebrow">Real-time CDC lakehouse</p>
+      <h1 id="hero-title">At-least-once delivery in. Exactly-once results out.</h1>
+      <p class="lede">Tidewater streams every change from Postgres through Debezium and Kafka into Delta Lake and a warehouse. Kafka may deliver an event twice, late, or out of order; one LSN-guarded MERGE makes the result exactly right anyway.</p>
+      <p id="run-badge" class="run-badge" aria-live="polite"></p>
+
+      <figure class="arch">
+        <svg class="arch-wide" viewBox="0 0 1000 150" role="img" aria-labelledby="arch-t arch-d">
+          <title id="arch-t">Tidewater architecture</title>
+          <desc id="arch-d">Postgres to Debezium to Kafka to bronze Delta to silver Delta with an LSN-guarded MERGE, then to a Postgres or Snowflake warehouse, dbt marts and Metabase dashboards.</desc>
+          <defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" class="ah"/></marker></defs>
+          <text x="8" y="22" class="lane">SOURCE &amp; CDC</text>
+          <text x="380" y="22" class="lane">LAKEHOUSE · DELTA ON S3</text>
+          <text x="628" y="22" class="lane">WAREHOUSE &amp; BI</text>
+          <g class="node"><rect x="8" y="44" width="108" height="66" rx="9"/><text x="62" y="72">Postgres</text><text x="62" y="92" class="s">source · WAL</text></g>
+          <g class="node"><rect x="132" y="44" width="108" height="66" rx="9"/><text x="186" y="72">Debezium</text><text x="186" y="92" class="s">pgoutput slot</text></g>
+          <g class="node"><rect x="256" y="44" width="108" height="66" rx="9"/><text x="310" y="72">Kafka</text><text x="310" y="92" class="s">Avro · registry</text></g>
+          <g class="node"><rect x="380" y="44" width="108" height="66" rx="9"/><text x="434" y="72">Bronze</text><text x="434" y="92" class="s">raw, append</text></g>
+          <g class="node key"><rect x="504" y="44" width="108" height="66" rx="9"/><text x="558" y="72">Silver</text><text x="558" y="92" class="s">LSN-guarded MERGE</text></g>
+          <g class="node"><rect x="628" y="44" width="108" height="66" rx="9"/><text x="682" y="72">Warehouse</text><text x="682" y="92" class="s">Postgres/Snowflake</text></g>
+          <g class="node"><rect x="752" y="44" width="108" height="66" rx="9"/><text x="806" y="72">dbt</text><text x="806" y="92" class="s">marts · SCD2</text></g>
+          <g class="node"><rect x="876" y="44" width="108" height="66" rx="9"/><text x="930" y="72">Metabase</text><text x="930" y="92" class="s">dashboards</text></g>
+          <g class="edges"><path d="M116 77h14"/><path d="M240 77h14"/><path d="M364 77h14"/><path d="M488 77h14"/><path d="M612 77h14"/><path d="M736 77h14"/><path d="M860 77h14"/></g>
+          <text x="310" y="136" class="note">at-least-once: duplicates, reordering</text>
+          <text x="558" y="136" class="note key">exactly-once result</text>
+        </svg>
+        <svg class="arch-tall" viewBox="0 0 300 560" role="img" aria-labelledby="arch-t2">
+          <title id="arch-t2">Tidewater architecture: Postgres, Debezium, Kafka, bronze, silver with an LSN-guarded MERGE, warehouse, dbt, Metabase</title>
+          <defs><marker id="ah2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" class="ah"/></marker></defs>
+          <g class="node"><rect x="30" y="4" width="240" height="50" rx="9"/><text x="150" y="26">Postgres</text><text x="150" y="44" class="s">source · WAL</text></g>
+          <g class="node"><rect x="30" y="74" width="240" height="50" rx="9"/><text x="150" y="96">Debezium</text><text x="150" y="114" class="s">pgoutput slot</text></g>
+          <g class="node"><rect x="30" y="144" width="240" height="50" rx="9"/><text x="150" y="166">Kafka</text><text x="150" y="184" class="s">at-least-once: duplicates, reordering</text></g>
+          <g class="node"><rect x="30" y="214" width="240" height="50" rx="9"/><text x="150" y="236">Bronze (Delta)</text><text x="150" y="254" class="s">raw, append</text></g>
+          <g class="node key"><rect x="30" y="284" width="240" height="50" rx="9"/><text x="150" y="306">Silver (Delta)</text><text x="150" y="324" class="s">LSN-guarded MERGE → exactly-once</text></g>
+          <g class="node"><rect x="30" y="354" width="240" height="50" rx="9"/><text x="150" y="376">Warehouse</text><text x="150" y="394" class="s">Postgres / Snowflake</text></g>
+          <g class="node"><rect x="30" y="424" width="240" height="50" rx="9"/><text x="150" y="446">dbt</text><text x="150" y="464" class="s">marts · SCD2</text></g>
+          <g class="node"><rect x="30" y="494" width="240" height="50" rx="9"/><text x="150" y="516">Metabase</text><text x="150" y="534" class="s">dashboards</text></g>
+          <g class="edges tall"><path d="M150 54v18"/><path d="M150 124v18"/><path d="M150 194v18"/><path d="M150 264v18"/><path d="M150 334v18"/><path d="M150 404v18"/><path d="M150 474v18"/></g>
+        </svg>
+      </figure>
+    </section>
+
+    <section id="try" class="band" aria-labelledby="try-title">
+      <div class="wrap">
+        <h2 id="try-title">Try to break it</h2>
+        <p class="section-lede">Change the source table, then attack the delivery: redeliver events, shuffle them, kill Spark mid-batch, replay everything. Both sinks get exactly the same deliveries. The naive sink applies them in arrival order; Tidewater applies each micro-batch with the production MERGE rule.</p>
+        <p class="honest"><strong>This is a simulation</strong> running in your browser, not the live pipeline. It uses the same merge rule as the real Spark job, ported to <a href="https://github.com/Gnanasudharsan/tidewater/blob/main/site/js/merge.js"><code>merge.js</code></a>.</p>
+
+        <div id="sim" class="sim">
+          <div class="toolbar" role="toolbar" aria-label="Simulator controls">
+            <div class="group" role="group" aria-label="Source">
+              <span class="glabel">Source</span>
+              <button type="button" id="btn-insert">Insert row</button>
+              <button type="button" id="btn-auto" aria-pressed="false">Auto traffic</button>
+            </div>
+            <div class="group" role="group" aria-label="Break delivery">
+              <span class="glabel">Break delivery</span>
+              <span class="dup-ctl">
+                <button type="button" id="btn-dup">Duplicate last</button>
+                <label class="sr-only" for="dup-n">Number of events to duplicate</label>
+                <select id="dup-n"><option>1</option><option selected>3</option><option>5</option><option>10</option></select>
+              </span>
+              <button type="button" id="btn-shuffle">Shuffle in-flight</button>
+              <button type="button" id="btn-kill" class="danger">Kill Spark mid-batch</button>
+              <button type="button" id="btn-replay">Replay all from bronze</button>
+            </div>
+            <div class="group" role="group" aria-label="Stream">
+              <span class="glabel">Stream</span>
+              <button type="button" id="btn-stream" aria-pressed="false">Pause stream</button>
+              <button type="button" id="btn-batch">Run one micro-batch</button>
+            </div>
+            <div class="group" role="group" aria-label="Scenario">
+              <span class="glabel">Scenario</span>
+              <button type="button" id="btn-share">Copy share link</button>
+              <button type="button" id="btn-reset">Reset</button>
+            </div>
+          </div>
+          <p class="status-line"><span id="stream-state" class="muted"></span> <span id="sim-status" role="status" aria-live="polite"></span></p>
+          <p id="lag-note" class="lag-note" hidden>Events are still in flight, so both sinks are behind the source for now. Reconciliation is meaningful once they catch up, just as <code>reconcile.py</code> runs when the source is quiet.</p>
+
+          <div class="grid">
+            <section class="panel" aria-labelledby="p-src">
+              <header><h3 id="p-src">Source Postgres <code>orders</code></h3><span id="src-count" class="muted"></span></header>
+              <div class="scroll"><table><thead><tr><th scope="col">id</th><th scope="col">status</th><th scope="col" class="num">amount</th><th scope="col"><span class="sr-only">actions</span></th></tr></thead><tbody id="src-body"></tbody></table></div>
+            </section>
+            <section class="panel" aria-labelledby="p-kafka">
+              <header><h3 id="p-kafka">Kafka log</h3><span id="kafka-count" class="muted"></span></header>
+              <div class="inflight"><span class="glabel">In flight, next first</span><ul id="pending" class="chips" aria-label="In-flight deliveries in arrival order"></ul></div>
+              <div class="scroll"><ol id="kafka-body" class="events" aria-label="Kafka events, newest first"></ol></div>
+            </section>
+            <section class="panel sink naive" aria-labelledby="p-naive">
+              <header><h3 id="p-naive">Naive sink</h3><span class="muted">applies in arrival order</span></header>
+              <div id="naive-recon" class="recon"></div>
+              <div class="scroll"><table><thead><tr><th scope="col">id</th><th scope="col">status</th><th scope="col" class="num">amount</th><th scope="col"><span class="sr-only">check</span></th></tr></thead><tbody id="naive-body"></tbody></table></div>
+            </section>
+            <section class="panel sink tw" aria-labelledby="p-tw">
+              <header><h3 id="p-tw">Tidewater silver</h3><span class="muted">click an id for its trace</span></header>
+              <div id="tw-recon" class="recon"></div>
+              <div class="scroll"><table><thead><tr><th scope="col">id</th><th scope="col">status</th><th scope="col" class="num">amount</th><th scope="col">_lsn</th><th scope="col"><span class="sr-only">check</span></th></tr></thead><tbody id="tw-body"></tbody></table></div>
+            </section>
+          </div>
+        </div>
+
+        <dialog id="trace" aria-labelledby="trace-title">
+          <div class="dialog-head"><h3 id="trace-title">Trace</h3><button type="button" id="trace-close" class="mini" aria-label="Close trace">Close</button></div>
+          <p id="trace-final"></p>
+          <ol id="trace-list" class="trace"></ol>
+        </dialog>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="wrap">
+      <ul class="links">
+        <li><a href="https://github.com/Gnanasudharsan/tidewater">Repository</a></li>
+        <li><a href="https://github.com/Gnanasudharsan/tidewater/blob/main/docs/design.md">Design doc</a></li>
+        <li><a href="https://github.com/Gnanasudharsan/tidewater/tree/main/docs/adr">ADRs</a></li>
+        <li><a href="https://github.com/Gnanasudharsan/tidewater/tree/main/docs/runbooks">Runbooks</a></li>
+        <li><a href="https://github.com/Gnanasudharsan/tidewater/blob/main/docs/launch/blog_post.md">Blog post</a></li>
+        <li><a href="https://github.com/Gnanasudharsan">@Gnanasudharsan</a></li>
+      </ul>
+      <p class="muted">Static site on GitHub Pages. No trackers, no cookies, no third-party requests.</p>
+    </div>
+  </footer>
+
+  <script src="js/merge.js"></script>
+  <script src="js/sim.js"></script>
+</body>
+</html>
