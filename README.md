@@ -1,13 +1,21 @@
 # Tidewater
 
 [![ci](https://github.com/Gnanasudharsan/tidewater/actions/workflows/ci.yml/badge.svg)](https://github.com/Gnanasudharsan/tidewater/actions/workflows/ci.yml)
-[![dbt docs](https://img.shields.io/badge/dbt-docs-orange.svg)](https://gnanasudharsan.github.io/tidewater/)
+[![showcase](https://github.com/Gnanasudharsan/tidewater/actions/workflows/showcase.yml/badge.svg)](https://github.com/Gnanasudharsan/tidewater/actions/workflows/showcase.yml)
+[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/Gnanasudharsan/tidewater?quickstart=1)
+[![dbt docs](https://img.shields.io/badge/dbt-docs-orange.svg)](https://gnanasudharsan.github.io/tidewater/catalog/)
 ![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)
 
 **A CDC lakehouse that turns at-least-once Kafka delivery into exactly-once results, and proves it by crashing itself.**
 
 Postgres → Debezium → Kafka → Spark → Delta Lake → Postgres / Snowflake → dbt → Metabase, with
 Airflow, Prometheus/Grafana, OpenLineage and Terraform. Runs on a laptop for $0; benchmarked on Snowflake.
+
+**[Live site: try to break it in your browser →](https://gnanasudharsan.github.io/tidewater/)**
+Redeliver, shuffle, kill Spark mid-batch and replay events against a naive sink and
+Tidewater's merge, then check the latest verified run of the real pipeline in CI.
+
+[![The simulator: after duplicates, a shuffle and a mid-batch kill, the naive sink has 3 duplicate rows and a 25% hash match; Tidewater silver stays at 100%](docs/media/simulator.gif)](https://gnanasudharsan.github.io/tidewater/#try)
 
 ![Tidewater architecture](docs/architecture.svg)
 
@@ -24,6 +32,54 @@ Airflow, Prometheus/Grafana, OpenLineage and Terraform. Runs on a laptop for $0;
 | **A real incident** | Kafka lost every topic; the pipeline refused to continue, was recovered to 100%, and got a postmortem | [postmortem](docs/incidents/2026-11-01-kafka-log-loss.md) |
 
 ![Live dashboard: load arrives, bronze is SIGKILLed mid-batch (gap in the lag line), and recovers](docs/media/dashboard.gif)
+
+## How the showcase works
+
+The [live site](https://gnanasudharsan.github.io/tidewater/) has two kinds of evidence,
+labelled as such:
+
+- **The simulator is a simulation.** It runs in the browser with
+  [`site/js/merge.js`](site/js/merge.js), a port of the silver MERGE rule. A parity test
+  ([`tests/parity`](tests/parity)) runs the same tricky event sequences (duplicates,
+  out-of-order events, a delete followed by a late update, a kill mid-batch, a full
+  replay) through `merge.js` and through the real PySpark merge on Delta Lake. CI fails
+  if their final state or their late events differ.
+- **The proof is real.** [`showcase.yml`](.github/workflows/showcase.yml) runs on every
+  push to `main`, nightly, and on demand. It starts the real stack, pushes 1,000 events
+  through to the dbt marts, runs chaos tests 01 and 04, and reconciles silver against
+  the source row by row. [`emit_results.py`](scripts/emit_results.py) writes what was
+  measured to `latest.json`, and the site shows it with a link to the run. A failed run
+  is published as failed. Anything not measured shows "Not yet measured", never a
+  placeholder. The last 30 runs are kept on the `showcase-data` branch.
+
+The results tables come from committed files (`bench/results/`,
+[`results/chaos_local_runs.json`](results/chaos_local_runs.json)). The dbt docs are
+published at [`/catalog/`](https://gnanasudharsan.github.io/tidewater/catalog/).
+`make site` previews it all locally.
+
+**Codespaces:** the core profile's container memory limits add up to about 9.6 GB
+(about 6 GB in practice), and `make demo` adds Prometheus and Grafana. That fits the
+4-core / 16 GB machine the devcontainer asks for. Running every profile at once (about
+19 GB of limits) needs a bigger machine.
+
+<details>
+<summary>One-time setup for the repo owner</summary>
+
+1. **Settings → Pages → Build and deployment → Source: GitHub Actions.**
+2. **Settings → Actions → General:** allow GitHub Actions to run. The workflow declares
+   its own token permissions (`contents: write` only for the job that updates the
+   `showcase-data` branch; `pages: write` and `id-token: write` only for the deploy job),
+   so the default read-only token setting is fine.
+3. **Settings → Environments → github-pages:** keep the default rule that allows
+   deployments from `main`.
+4. Run it once: **Actions → showcase → Run workflow**.
+
+**The nightly run stops after 60 days without repository activity.** GitHub disables
+scheduled workflows in inactive public repos and emails the owner. To turn it back on:
+**Actions → showcase → Enable workflow** (or push any commit). The site's badge turns
+⚠️ stale once the latest run is more than 48 hours old.
+
+</details>
 
 ## Quickstart
 

@@ -1,0 +1,22 @@
+{
+  "name": "Tidewater",
+  "image": "mcr.microsoft.com/devcontainers/python:1-3.11-bookworm",
+  "features": {
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {},
+    "ghcr.io/devcontainers/features/node:1": { "version": "lts" }
+  },
+  "hostRequirements": {
+    "cpus": 4,
+    "memory": "16gb",
+    "storage": "32gb"
+  },
+  "postCreateCommand": "cp -n .env.example .env; docker compose --profile core --profile obs pull --ignore-buildable --quiet && docker compose build spark-bronze",
+  "forwardPorts": [8080, 3001, 3000, 8888, 4040],
+  "portsAttributes": {
+    "8080": { "label": "Kafka UI" },
+    "3001": { "label": "Grafana" },
+    "3000": { "label": "Metabase (make up-wh)" },
+    "8888": { "label": "SeaweedFS filer (lakehouse files)" },
+    "4040": { "label": "Spark UI (bronze)" }
+  }
+}
