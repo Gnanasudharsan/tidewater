@@ -313,12 +313,24 @@
         .join("") || `<tr><td colspan="5" class="empty">Empty.</td></tr>`;
   }
 
-  function render(msg) {
+  function render(msg, quiet) {
+    // Tables are re-rendered on every action (timers included): keep keyboard focus.
+    const f = document.activeElement;
+    const key = f && f.dataset && (f.dataset.act ? "act" : f.dataset.trace ? "trace" : null);
+    const val = key && f.dataset[key];
     renderSource();
     renderKafka();
     renderNaive();
     renderSilver();
-    if (msg) $("sim-status").textContent = msg;
+    if (key && !document.body.contains(f)) {
+      const again = $("sim").querySelector(`[data-${key}="${val}"]`);
+      if (again) again.focus();
+    }
+    if (msg) {
+      // Timer-driven updates stay visible but are not announced every second.
+      $("sim-status").setAttribute("aria-live", quiet ? "off" : "polite");
+      $("sim-status").textContent = msg;
+    }
     $("lag-note").hidden = S.pending.length === 0;
   }
 
@@ -356,20 +368,20 @@
   let autoTimer = null;
   let streamTimer = null;
 
-  function act(code) {
-    render(run(code));
+  function act(code, quiet) {
+    render(run(code), quiet);
   }
 
   function setAuto(on) {
     clearInterval(autoTimer);
-    autoTimer = on ? setInterval(() => act("x"), 700) : null;
+    autoTimer = on ? setInterval(() => act("x", true), 700) : null;
     $("btn-auto").setAttribute("aria-pressed", String(on));
     $("btn-auto").textContent = on ? "Stop traffic" : "Auto traffic";
   }
 
   function setStream(on) {
     clearInterval(streamTimer);
-    streamTimer = on ? setInterval(() => S.pending.length && act("b"), 1800) : null;
+    streamTimer = on ? setInterval(() => S.pending.length && act("b", true), 1800) : null;
     $("btn-stream").setAttribute("aria-pressed", String(!on));
     $("btn-stream").textContent = on ? "Pause stream" : "Resume stream";
     $("stream-state").textContent = on ? "Stream running: a micro-batch every 1.8 s" : "Stream paused: events pile up in flight";

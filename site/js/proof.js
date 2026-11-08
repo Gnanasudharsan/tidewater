@@ -68,14 +68,14 @@
   }
 
   function card(label, value, sub) {
-    return `<div class="card"><dt>${label}</dt><dd>${value}</dd>${sub ? `<p class="sub">${sub}</p>` : ""}</div>`;
+    return `<div class="card"><dt>${label}</dt><dd>${value}</dd>${sub ? `<dd class="sub">${sub}</dd>` : ""}</div>`;
   }
 
   function cards(latest) {
     const el = $("proof-cards");
     if (!el) return;
     if (!latest) {
-      el.innerHTML = `<p class="muted">The showcase workflow has not published a run yet. Every card below appears once it does.</p>`;
+      el.innerHTML = card("Latest CI run", NA, "The showcase workflow has not published a run yet; the cards appear once it does.");
       return;
     }
     const lat = latest.latency_ms;
@@ -103,7 +103,7 @@
       el.innerHTML = `<p class="muted">The trend appears after two published runs${runs.length ? " (one so far)" : ""}.</p>`;
       return;
     }
-    const W = 760, H = 260, L = 52, R = 16, T = 18, B = 58;
+    const W = 600, H = 250, L = 48, R = 14, T = 16, B = 58;
     const pts = runs.map((r, i) => ({ i, r, p50: r.latency_ms ? r.latency_ms.p50 / 1000 : null, p95: r.latency_ms ? r.latency_ms.p95 / 1000 : null }));
     const maxY = Math.max(10, ...pts.map((p) => p.p95 || 0));
     const niceMax = Math.ceil(maxY / 10) * 10;

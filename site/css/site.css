@@ -195,13 +195,13 @@ dialog::backdrop { background: rgb(5 10 20 / 55%); }
 .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; box-shadow: var(--shadow); min-width: 0; }
 .card dt { font-size: 0.74rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: 700; }
 .card dd { margin: 4px 0 0; font-size: 1.45rem; font-weight: 800; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
-.card .sub { margin: 4px 0 0; font-size: 0.82rem; color: var(--muted); }
+.card dd.sub { margin: 4px 0 0; font-size: 0.82rem; font-weight: 400; color: var(--muted); }
 .na { font-size: 0.95rem; font-weight: 600; color: var(--muted); }
 .chart-title { margin-top: 28px; }
 .trend { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; box-shadow: var(--shadow); }
 .trend svg { display: block; width: 100%; height: auto; }
 .trend .tick line { stroke: var(--border); }
-.trend .tick text, .trend .axis { font: 11px var(--sans); fill: var(--muted); text-anchor: end; }
+.trend .tick text, .trend .axis { font: 13px var(--sans); fill: var(--muted); text-anchor: end; }
 .trend .axis { text-anchor: start; }
 .trend .axis.end { text-anchor: end; }
 .trend .l95 { fill: none; stroke: var(--accent); stroke-width: 2.2; }

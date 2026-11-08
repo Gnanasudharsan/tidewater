@@ -139,7 +139,7 @@ site: ## Build the showcase site's data from committed results and serve it on h
 
 parity: ## Prove the site's merge.js matches the PySpark merge on Delta (tests/parity)
 	mkdir -p tests/parity/out && node tests/parity/run_merge.js > tests/parity/out/js_result.json
-	$(COMPOSE) run --rm --no-deps -v "$(CURDIR)/tests/parity:/opt/tidewater/parity" spark-bronze \
+	$(COMPOSE) run --rm --no-deps --build -v "$(CURDIR)/tests/parity:/opt/tidewater/parity" spark-bronze \
 		python3 -m pytest -q -p no:cacheprovider parity
 
 verify-bronze: ## Check bronze has every Kafka offset exactly once (add ARGS=--require-caught-up)
