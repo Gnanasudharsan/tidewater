@@ -1,0 +1,154 @@
+{
+  "about": "Event sequences run through BOTH site/js/merge.js and the PySpark merge (latest_per_key -> classify_against_target -> merge_into_silver on Delta). Each batch is one micro-batch, events in arrival order. 'expect' is the hand-checked final state; both implementations must match it and each other.",
+  "scenarios": [
+    {
+      "name": "duplicates_in_one_batch",
+      "batches": [
+        [
+          {"pk": 1, "op": "c", "lsn": 10, "offset": 0, "status": "placed", "amount": 20.0},
+          {"pk": 1, "op": "u", "lsn": 20, "offset": 1, "status": "paid", "amount": 20.0},
+          {"pk": 1, "op": "u", "lsn": 20, "offset": 1, "status": "paid", "amount": 20.0},
+          {"pk": 1, "op": "c", "lsn": 10, "offset": 0, "status": "placed", "amount": 20.0}
+        ]
+      ],
+      "expect": {"1": {"status": "paid", "is_deleted": false, "_lsn": 20}}
+    },
+    {
+      "name": "batch_redelivered_after_commit",
+      "batches": [
+        [
+          {"pk": 1, "op": "c", "lsn": 10, "offset": 0, "status": "placed", "amount": 20.0},
+          {"pk": 2, "op": "c", "lsn": 11, "offset": 1, "status": "placed", "amount": 35.5}
+        ],
+        [
+          {"pk": 1, "op": "c", "lsn": 10, "offset": 0, "status": "placed", "amount": 20.0},
+          {"pk": 2, "op": "c", "lsn": 11, "offset": 1, "status": "placed", "amount": 35.5}
+        ]
+      ],
+      "expect": {"1": {"status": "placed", "is_deleted": false, "_lsn": 10}, "2": {"status": "placed", "is_deleted": false, "_lsn": 11}}
+    },
+    {
+      "name": "out_of_order_within_batch",
+      "batches": [
+        [
+          {"pk": 1, "op": "u", "lsn": 30, "offset": 2, "status": "shipped", "amount": 20.0},
+          {"pk": 1, "op": "c", "lsn": 10, "offset": 0, "status": "placed", "amount": 20.0},
+          {"pk": 1, "op": "u", "lsn": 20, "offset": 1, "status": "paid", "amount": 20.0}
+        ]
+      ],
+      "expect": {"1": {"status": "shipped", "is_deleted": false, "_lsn": 30}}
+    },
+    {
+      "name": "older_event_arrives_in_a_later_batch",
+      "batches": [
+        [
+          {"pk": 1, "op": "c", "lsn": 10, "offset": 0, "status": "placed", "amount": 20.0},
+          {"pk": 1, "op": "u", "lsn": 30, "offset": 2, "status": "shipped", "amount": 20.0}
+        ],
+        [
+          {"pk": 1, "op": "u", "lsn": 20, "offset": 1, "status": "paid", "amount": 20.0}
+        ]
+      ],
+      "expect": {"1": {"status": "shipped", "is_deleted": false, "_lsn": 30}}
+    },
+    {
+      "name": "delete_then_late_update",
+      "batches": [
+        [
+          {"pk": 7, "op": "c", "lsn": 10, "offset": 0, "status": "placed", "amount": 99.99},
+          {"pk": 7, "op": "d", "lsn": 40, "offset": 3, "status": "paid", "amount": 99.99}
+        ],
+        [
+          {"pk": 7, "op": "u", "lsn": 30, "offset": 2, "status": "paid", "amount": 99.99}
+        ]
+      ],
+      "expect": {"7": {"status": "paid", "is_deleted": true, "_lsn": 40}}
+    },
+    {
+      "name": "create_and_delete_in_one_batch",
+      "batches": [
+        [
+          {"pk": 3, "op": "c", "lsn": 10, "offset": 0, "status": "placed", "amount": 5.25},
+          {"pk": 3, "op": "d", "lsn": 20, "offset": 1, "status": "placed", "amount": 5.25}
+        ]
+      ],
+      "expect": {"3": {"status": "placed", "is_deleted": true, "_lsn": 20}}
+    },
+    {
+      "name": "equal_lsn_ordered_by_offset",
+      "batches": [
+        [
+          {"pk": 1, "op": "u", "lsn": 50, "offset": 6, "status": "shipped", "amount": 20.0}
+        ],
+        [
+          {"pk": 1, "op": "u", "lsn": 50, "offset": 5, "status": "paid", "amount": 20.0}
+        ]
+      ],
+      "expect": {"1": {"status": "shipped", "is_deleted": false, "_lsn": 50}}
+    },
+    {
+      "name": "spark_killed_mid_batch_then_full_replay",
+      "batches": [
+        [
+          {"pk": 1, "op": "c", "lsn": 10, "offset": 0, "status": "placed", "amount": 20.0},
+          {"pk": 2, "op": "c", "lsn": 11, "offset": 1, "status": "placed", "amount": 40.0}
+        ],
+        [
+          {"pk": 1, "op": "c", "lsn": 10, "offset": 0, "status": "placed", "amount": 20.0},
+          {"pk": 2, "op": "c", "lsn": 11, "offset": 1, "status": "placed", "amount": 40.0},
+          {"pk": 1, "op": "u", "lsn": 12, "offset": 2, "status": "paid", "amount": 20.0},
+          {"pk": 2, "op": "d", "lsn": 13, "offset": 3, "status": "placed", "amount": 40.0}
+        ]
+      ],
+      "expect": {"1": {"status": "paid", "is_deleted": false, "_lsn": 12}, "2": {"status": "placed", "is_deleted": true, "_lsn": 13}}
+    },
+    {
+      "name": "replay_everything_from_bronze",
+      "batches": [
+        [
+          {"pk": 1, "op": "c", "lsn": 10, "offset": 0, "status": "placed", "amount": 20.0},
+          {"pk": 2, "op": "c", "lsn": 11, "offset": 1, "status": "placed", "amount": 40.0},
+          {"pk": 3, "op": "c", "lsn": 12, "offset": 2, "status": "placed", "amount": 60.0}
+        ],
+        [
+          {"pk": 1, "op": "u", "lsn": 20, "offset": 3, "status": "paid", "amount": 20.0},
+          {"pk": 3, "op": "d", "lsn": 21, "offset": 4, "status": "placed", "amount": 60.0},
+          {"pk": 2, "op": "u", "lsn": 22, "offset": 5, "status": "paid", "amount": 42.0}
+        ],
+        [
+          {"pk": 1, "op": "c", "lsn": 10, "offset": 0, "status": "placed", "amount": 20.0},
+          {"pk": 2, "op": "c", "lsn": 11, "offset": 1, "status": "placed", "amount": 40.0},
+          {"pk": 3, "op": "c", "lsn": 12, "offset": 2, "status": "placed", "amount": 60.0},
+          {"pk": 1, "op": "u", "lsn": 20, "offset": 3, "status": "paid", "amount": 20.0},
+          {"pk": 3, "op": "d", "lsn": 21, "offset": 4, "status": "placed", "amount": 60.0},
+          {"pk": 2, "op": "u", "lsn": 22, "offset": 5, "status": "paid", "amount": 42.0}
+        ]
+      ],
+      "expect": {
+        "1": {"status": "paid", "is_deleted": false, "_lsn": 20},
+        "2": {"status": "paid", "is_deleted": false, "_lsn": 22},
+        "3": {"status": "placed", "is_deleted": true, "_lsn": 21}
+      }
+    },
+    {
+      "name": "shuffled_redeliveries_across_keys",
+      "batches": [
+        [
+          {"pk": 2, "op": "c", "lsn": 11, "offset": 1, "status": "placed", "amount": 40.0},
+          {"pk": 1, "op": "u", "lsn": 20, "offset": 3, "status": "paid", "amount": 21.0}
+        ],
+        [
+          {"pk": 1, "op": "c", "lsn": 10, "offset": 0, "status": "placed", "amount": 20.0},
+          {"pk": 2, "op": "u", "lsn": 25, "offset": 4, "status": "paid", "amount": 40.0},
+          {"pk": 2, "op": "c", "lsn": 11, "offset": 1, "status": "placed", "amount": 40.0}
+        ],
+        [
+          {"pk": 1, "op": "u", "lsn": 20, "offset": 3, "status": "paid", "amount": 21.0},
+          {"pk": 2, "op": "d", "lsn": 30, "offset": 6, "status": "paid", "amount": 40.0},
+          {"pk": 1, "op": "u", "lsn": 15, "offset": 2, "status": "placed", "amount": 21.0}
+        ]
+      ],
+      "expect": {"1": {"status": "paid", "is_deleted": false, "_lsn": 20}, "2": {"status": "paid", "is_deleted": true, "_lsn": 30}}
+    }
+  ]
+}

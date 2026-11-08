@@ -38,6 +38,8 @@ jobs:
       - run: cp .env.example .env
       - run: docker compose build spark-bronze
       - run: docker compose run --rm --no-deps spark-bronze python3 -m pytest -q -p no:cacheprovider tests
+      - name: "Merge parity: site/js/merge.js vs the PySpark merge on Delta"
+        run: make parity
 
   airflow-dags:
     runs-on: ubuntu-latest

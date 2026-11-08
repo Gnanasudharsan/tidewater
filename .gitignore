@@ -36,3 +36,4 @@ terraform/**/*.tfvars
 
 # Local credentials (Snowflake private key, etc.)
 .secrets/
+tests/parity/out/
