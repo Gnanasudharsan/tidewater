@@ -140,5 +140,42 @@
   "integration_passed": true,
   "warm_reconcile_passed": true,
   "parity_passed": true
+ },
+ {
+  "status": "passed",
+  "run_url": "https://github.com/Gnanasudharsan/tidewater/actions/runs/42838288290",
+  "commit_sha": "bd557e441ecec557522058321ef51043199f6c3a",
+  "timestamp_utc": "2026-11-10T15:07:47Z",
+  "events_processed": 1600,
+  "rows_reconciled": 3197,
+  "duplicates_in_silver": 0,
+  "hash_match_pct": 100.0,
+  "latency_ms": {
+   "p50": 61950,
+   "p95": 95100,
+   "batches": 2
+  },
+  "latency_cold_ms": {
+   "p50": 70100,
+   "p95": 70100,
+   "batches": 1
+  },
+  "chaos": [
+   {
+    "name": "01_kill_bronze_mid_batch",
+    "passed": true,
+    "notes": "PASS: 3 mid-batch kills + 1 post-commit crash, every offset exactly once",
+    "seconds": 178
+   },
+   {
+    "name": "04_malformed_events",
+    "passed": true,
+    "notes": "PASS: malformed records quarantined with reasons; streams never stopped",
+    "seconds": 245
+   }
+  ],
+  "integration_passed": true,
+  "warm_reconcile_passed": true,
+  "parity_passed": true
  }
 ]
